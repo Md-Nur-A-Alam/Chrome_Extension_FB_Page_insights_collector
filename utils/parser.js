@@ -346,14 +346,28 @@ const Parser = {
 
   /**
    * Normalizes caption and text, keeping emojis, Bangla, English, and line breaks
+   * Automatically strips button artifacts like "See more", "Show more", "Show less", etc.
    */
   cleanText(text) {
     if (!text) return '';
-    return text
+    let cleaned = text
       .replace(/\r\n/g, '\n')
       .replace(/\u00a0/g, ' ') // replace non-breaking space
       .replace(/\s+/g, ' ')
       .trim();
+
+    // Repeatedly strip trailing button phrases (only specific phrases, not bare words)
+    const buttonTrailingRegex = /(?:\s*\.{2,3}\s*|\s+)(?:see\s*more|show\s*more|show\s*less|see\s*less|আরও\s*দেখুন|কম\s*দেখুন)\s*$/gi;
+    let prev = '';
+    while (cleaned !== prev) {
+      prev = cleaned;
+      cleaned = cleaned.replace(buttonTrailingRegex, '').trim();
+    }
+    cleaned = cleaned.replace(/\n\s*(?:see\s*more|show\s*more|show\s*less|see\s*less|আরও\s*দেখুন|কম\s*দেখুন)\s*$/gi, '').trim();
+    cleaned = cleaned.replace(/(?:see\s*more|show\s*more|show\s*less|see\s*less|আরও\s*দেখুন|কম\s*দেখুন)\s*$/gi, '').trim();
+    cleaned = cleaned.replace(/\s*\.{2,3}\s*$/, '').trim();
+
+    return cleaned;
   }
 };
 

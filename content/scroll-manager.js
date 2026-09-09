@@ -285,15 +285,20 @@ class ScrollManager {
     const currentReel = queue[index];
     const progressLabel = `Reel ${index + 1}/${queue.length}`;
     console.log(`[FB-Collector] Phase 2: Collecting ${progressLabel}: ID=${currentReel.id}, URL=${window.location.href}`);
-    this.broadcastState(`Phase 2: Collecting ${progressLabel}...`);
 
-    // 1. Initial pause for DOM and React to mount
-    await new Promise(r => setTimeout(r, 600));
+    // 1. Mandatory 3-second pause for Facebook to completely load video, player, and action bar metrics
+    console.log(`[FB-Collector] Waiting 3.0s for Reel ${index + 1}/${queue.length} to fully render authentic data...`);
+    this.broadcastState(`Phase 2: Loading ${progressLabel} (waiting 3s for full render)...`);
+    await new Promise(r => setTimeout(r, 3000));
 
-    // 2. Adaptive polling: wait for Relay scripts or action bar DOM to render metrics
+    // 2. Expand caption if collapsed and wait for DOM text expansion
+    ReelsExtractor.expandCaptionIfCollapsed();
+    await new Promise(r => setTimeout(r, 400));
+
+    // 3. Adaptive polling: verify metrics rendered in DOM
     let details = null;
     const pollStart = Date.now();
-    const maxPollMs = Math.max(3000, delayMs + 1200);
+    const maxPollMs = 2500;
 
     while (Date.now() - pollStart < maxPollMs) {
       // Check if user stopped collection
@@ -308,16 +313,12 @@ class ScrollManager {
 
       details = ReelsExtractor.scrapeActivePlayer(currentReel.id, currentReel.url, pageAuthor);
 
-      // If we got non-zero reactions or comments and a relative date or video length, we are ready!
-      if ((details.reactions > 0 || details.comments > 0) && details.publishedDate !== 'Recent' && details.videoLength !== 'N/A') {
-        break;
-      }
-      // If we got engagement metrics, break early
-      if (details.reactions > 0 || details.comments > 0) {
+      // If we got engagement metrics, break
+      if (details.reactions > 0 || details.comments > 0 || details.shares > 0) {
         break;
       }
 
-      await new Promise(r => setTimeout(r, 350));
+      await new Promise(r => setTimeout(r, 400));
     }
 
     if (!details) {

@@ -149,6 +149,49 @@ const ReelsExtractor = {
   },
 
   /**
+   * Identifies the Active Reel Container on the page (isolated player viewport/dialog)
+   * Prevents picking up elements from global chat docks, comments, or right-rail suggestions.
+   */
+  getActiveReelContainer() {
+    if (typeof document === 'undefined') return null;
+
+    // 1. Check if an active modal dialog is present
+    const dialog = document.querySelector('div[role="dialog"]');
+    if (dialog && dialog.querySelector('video')) {
+      return dialog;
+    }
+
+    // 2. Identify by active <video> element
+    const videos = Array.from(document.querySelectorAll('video'));
+    const activeVideo = videos.find(v => !v.paused && v.currentTime > 0) || videos[0];
+
+    if (activeVideo) {
+      const d = activeVideo.closest('div[role="dialog"]');
+      if (d) return d;
+
+      const pagelet = activeVideo.closest('div[data-pagelet*="Reel"], div[data-pagelet*="Watch"]');
+      if (pagelet) return pagelet;
+
+      // Find closest ancestor containing both video and action buttons
+      let curr = activeVideo.parentElement;
+      for (let i = 0; i < 8 && curr && curr !== document.body; i++) {
+        if (curr.querySelector('div[role="toolbar"], div[role="button"][aria-label*="like" i], div[role="button"][aria-label*="share" i]')) {
+          return curr;
+        }
+        curr = curr.parentElement;
+      }
+
+      const main = activeVideo.closest('div[role="main"]');
+      if (main) return main;
+    }
+
+    return document.querySelector('div[role="dialog"]') ||
+           document.querySelector('div[data-pagelet*="Reel"]') ||
+           document.querySelector('div[role="main"]') ||
+           document.body;
+  },
+
+  /**
    * Scrapes the active Reel inside Facebook's Reel Player modal
    * @param {string|null} targetId
    * @param {string|null} targetUrl
@@ -156,34 +199,37 @@ const ReelsExtractor = {
    * @returns {Object}
    */
   scrapeActivePlayer(targetId = null, targetUrl = null, pageAuthorInfo = null) {
-    const currentUrl = window.location.href;
+    const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
     const cleanUrl = targetUrl || Parser.cleanUrl(currentUrl);
     let id = Parser.extractId(cleanUrl).replace(/^reel_/, '');
     if (!id && targetId) id = targetId;
 
     // Auto-mute video to prevent blaring audio during automated scraping
-    const video = document.querySelector('video');
+    const video = typeof document !== 'undefined' ? document.querySelector('video') : null;
     if (video) {
       video.muted = true;
     }
 
+    // Isolate active reel container
+    const activeContainer = this.getActiveReelContainer();
+
     // 1. Author Name, Handle, and Avatar (with fallback to page author)
-    const authorInfo = this.extractAuthorInfo(pageAuthorInfo);
+    const authorInfo = this.extractAuthorInfo(pageAuthorInfo, activeContainer);
 
     // 2. Expand "...more" / "আরও দেখুন" if caption is collapsed
-    this.expandCaptionIfCollapsed();
+    this.expandCaptionIfCollapsed(activeContainer);
 
-    // 3. Extract Full Content / Caption (strictly excluding comments!)
-    const content = this.extractPlayerCaption();
+    // 3. Extract Full Content / Caption (strictly excluding chat docks and comments!)
+    const content = this.extractPlayerCaption(activeContainer, id, authorInfo.name);
 
     // 4. Extract Engagement Metrics (Reactions, Comments, Shares, Views)
-    const metrics = this.extractPlayerMetrics(id);
+    const metrics = this.extractPlayerMetrics(id, activeContainer);
 
     // 5. Media URL & Video Info
-    const mediaInfo = this.extractPlayerMedia(id);
+    const mediaInfo = this.extractPlayerMedia(id, activeContainer);
 
     // 6. Posted At Date
-    const postedAt = this.extractPlayerPostedDate(id);
+    const postedAt = this.extractPlayerPostedDate(id, activeContainer);
 
     return {
       id,
@@ -219,32 +265,35 @@ const ReelsExtractor = {
   /**
    * Extracts author details from the active Reel player
    */
-  extractAuthorInfo(pageAuthorInfo = null) {
+  extractAuthorInfo(pageAuthorInfo = null, activeContainer = null) {
     let name = '';
     let handle = '';
     let id = '';
     let avatar = '';
     let verified = false;
 
-    // Search author headers in player
-    const authorLinks = document.querySelectorAll('a[role="link"]');
-    for (const a of authorLinks) {
-      const href = a.getAttribute('href') || '';
-      if (
-        href.includes('/pedagoacademy') ||
-        href.includes('/TechDeck.BD') ||
-        (!href.includes('/reel/') && !href.includes('/watch') && !href.includes('/hashtag/') && href.length > 15)
-      ) {
-        const text = (a.textContent || '').trim();
-        if (text.length > 2 && text.length < 50 && !text.includes('Follow') && !text.includes('ফলো')) {
-          name = text;
-          handle = href.replace(/^https?:\/\/(www\.)?facebook\.com\//, '').replace(/\/$/, '').split('?')[0];
-          
-          const img = a.querySelector('img') || a.parentElement?.querySelector('img');
-          if (img && img.src) {
-            avatar = img.src;
+    const root = activeContainer || (typeof document !== 'undefined' ? document : null);
+    if (root) {
+      // Search author headers in player
+      const authorLinks = root.querySelectorAll('a[role="link"]');
+      for (const a of authorLinks) {
+        const href = a.getAttribute('href') || '';
+        if (
+          href.includes('/pedagoacademy') ||
+          href.includes('/TechDeck.BD') ||
+          (!href.includes('/reel/') && !href.includes('/watch') && !href.includes('/hashtag/') && href.length > 15)
+        ) {
+          const text = (a.textContent || '').trim();
+          if (text.length > 2 && text.length < 50 && !text.includes('Follow') && !text.includes('ফলো')) {
+            name = text;
+            handle = href.replace(/^https?:\/\/(www\.)?facebook\.com\//, '').replace(/\/$/, '').split('?')[0];
+            
+            const img = a.querySelector('img') || a.parentElement?.querySelector('img');
+            if (img && img.src) {
+              avatar = img.src;
+            }
+            break;
           }
-          break;
         }
       }
     }
@@ -257,7 +306,7 @@ const ReelsExtractor = {
       verified = pageAuthorInfo.verified || false;
     }
 
-    if (!name) {
+    if (!name && typeof window !== 'undefined') {
       if (window.location.href.includes('pedagoacademy')) {
         name = 'Pedago Academy';
         handle = 'pedagoacademy';
@@ -272,9 +321,11 @@ const ReelsExtractor = {
       }
     }
 
-    const verifiedBadge = document.querySelector('[aria-label*="Verified"], [aria-label*="ভেরিফাইড"], svg[aria-label*="Verified"]');
-    if (verifiedBadge) {
-      verified = true;
+    if (typeof document !== 'undefined') {
+      const verifiedBadge = document.querySelector('[aria-label*="Verified"], [aria-label*="ভেরিফাইড"], svg[aria-label*="Verified"]');
+      if (verifiedBadge) {
+        verified = true;
+      }
     }
 
     return { name, handle, id, avatar, verified };
@@ -283,54 +334,214 @@ const ReelsExtractor = {
   /**
    * Automatically clicks "...more" / "...আরও দেখুন" in the reel viewer to expand the full caption
    */
-  expandCaptionIfCollapsed() {
-    const expandButtons = document.querySelectorAll('div[role="button"], span[role="button"]');
+  expandCaptionIfCollapsed(activeContainer = null) {
+    const root = activeContainer || this.getActiveReelContainer();
+    if (!root) return;
+
+    const expandButtons = root.querySelectorAll('div[role="button"], span[role="button"], a[role="button"], [role="button"]');
     expandButtons.forEach(btn => {
+      // Must NOT be in comments or chat
+      if (
+        btn.closest('[role="article"]') ||
+        btn.closest('form') ||
+        btn.closest('[role="complementary"]') ||
+        btn.closest('[role="region"]') ||
+        btn.closest('[aria-label*="Chat" i]') ||
+        btn.closest('[aria-label*="Messenger" i]')
+      ) {
+        return;
+      }
+
       const txt = (btn.textContent || '').trim().toLowerCase();
-      if (txt === 'more' || txt === '...more' || txt === 'আরও দেখুন' || txt === '...আরও' || txt === 'see more') {
+      if (
+        txt === 'more' || txt === '...more' || txt === '…more' ||
+        txt === 'see more' || txt === '...see more' || txt === '…see more' ||
+        txt === 'show more' || txt === '...show more' || txt === '…show more' ||
+        txt === 'আরও দেখুন' || txt === '...আরও' || txt === '…আরও' || txt === 'আরও' ||
+        txt.includes('see more') || txt.includes('show more') || txt.includes('আরও দেখুন')
+      ) {
         try { btn.click(); } catch (e) {}
       }
     });
   },
 
   /**
-   * Extracts full caption text from active player
-   * STRICT FIX: Discards any text belonging to comment containers!
+   * Cleans text and strips any button artifacts like "See more", "Show more", "Show less", etc.
+   * Handles unicode horizontal ellipsis (\u2026), multiple dots, line breaks, and spaces.
    */
-  extractPlayerCaption() {
-    // 1. Identify all comment elements to blacklist
-    const commentRoots = document.querySelectorAll(
-      '[aria-label*="Comment"], [aria-label*="comment"], [aria-label*="মন্তব্য"], div[role="article"], form'
+  cleanCaptionText(text) {
+    if (!text) return '';
+    let str = text;
+    // Multi-pass removal of trailing button phrases
+    const buttonTrailingRegex = /(?:[\s\.\u2026\u00a0]*)(?:see\s*more|show\s*more|show\s*less|see\s*less|more|less|আরও\s*দেখুন|কম\s*দেখুন)[\s\.\u2026\u00a0]*$/gi;
+    let prev = '';
+    while (str !== prev) {
+      prev = str;
+      str = str.replace(buttonTrailingRegex, '').trim();
+    }
+    // Also remove if on a line by itself
+    str = str.replace(/\n\s*(?:see\s*more|show\s*more|show\s*less|see\s*less|more|less|আরও\s*দেখুন|কম\s*দেখুন)\s*$/gi, '').trim();
+    // Remove trailing ellipsis, dots, or non-breaking spaces
+    str = str.replace(/[\s\.\u2026\u00a0]+$/, '').trim();
+    return Parser.cleanText(str);
+  },
+
+  /**
+   * Scans Facebook Relay JSON script tags for authentic caption / message
+   * Returns exact full post text without DOM truncation
+   */
+  extractCaptionFromRelay(reelId) {
+    if (!reelId || typeof document === 'undefined') return null;
+    try {
+      const scripts = document.querySelectorAll('script[type="application/json"]');
+      for (const script of scripts) {
+        const content = script.textContent;
+        if (!content || !content.includes(reelId)) continue;
+
+        // 1. "message": { "text": "..." }
+        const mMsg = content.match(/["']message["']\s*:\s*\{\s*["']text["']\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        if (mMsg && mMsg[1]) {
+          try {
+            return JSON.parse(`"${mMsg[1]}"`);
+          } catch (e) {
+            return mMsg[1].replace(/\\n/g, '\n').replace(/\\"/g, '"');
+          }
+        }
+
+        // 2. "savable_description": { "text": "..." }
+        const mDesc = content.match(/["']savable_description["']\s*:\s*\{\s*["']text["']\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        if (mDesc && mDesc[1]) {
+          try {
+            return JSON.parse(`"${mDesc[1]}"`);
+          } catch (e) {
+            return mDesc[1].replace(/\\n/g, '\n').replace(/\\"/g, '"');
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[FB-Collector] Relay caption extraction error:', e);
+    }
+    return null;
+  },
+
+  /**
+   * Extracts full caption text from active player
+   * STRICTLY excludes comments, chat windows/docks, and navigation.
+   */
+  extractPlayerCaption(activeContainer = null, reelId = null, authorName = '') {
+    // 1. TIER 1: Check Relay script tags for authentic exact message/caption
+    if (reelId) {
+      const relayText = this.extractCaptionFromRelay(reelId);
+      if (relayText && relayText.length > 0) {
+        return this.cleanCaptionText(relayText);
+      }
+    }
+
+    // 2. TIER 2: Active Reel Container DOM search
+    const root = activeContainer || this.getActiveReelContainer();
+    if (!root) return '';
+
+    // Blacklist all comment elements, chat tabs, complementaries, and forms
+    const blacklistRoots = root.querySelectorAll(
+      '[role="article"], form, ul, [role="complementary"], [role="region"], [role="navigation"], [role="banner"], ' +
+      '[aria-label*="Chat" i], [aria-label*="Messenger" i], [aria-label*="Message" i], [aria-label*="Comment" i], [aria-label*="মন্তব্য" i], ' +
+      'div[data-pagelet*="ChatTab"], div[data-pagelet*="Messenger"]'
     );
-    const commentElements = new Set();
-    commentRoots.forEach(root => {
-      commentElements.add(root);
-      root.querySelectorAll('*').forEach(child => commentElements.add(child));
+    const blacklisted = new Set();
+    blacklistRoots.forEach(b => {
+      blacklisted.add(b);
+      b.querySelectorAll('*').forEach(child => blacklisted.add(child));
     });
 
-    // 2. Examine candidate text elements outside of comments
-    const candidateNodes = document.querySelectorAll('div[dir="auto"], span[dir="auto"]');
+    // Also check document-level chat docks and comments to ensure no stray elements leak in
+    if (typeof document !== 'undefined') {
+      const docChatRoots = document.querySelectorAll(
+        '[role="region"][aria-label*="Chat" i], [role="region"][aria-label*="Messenger" i], div[data-pagelet*="ChatTab"], div[data-pagelet*="Messenger"]'
+      );
+      docChatRoots.forEach(b => {
+        blacklisted.add(b);
+        b.querySelectorAll('*').forEach(child => blacklisted.add(child));
+      });
+    }
+
+    // A. PRIORITY: Search from author element within activeContainer
+    let authorEl = null;
+    const authorLinks = root.querySelectorAll('a[role="link"]');
+    for (const a of authorLinks) {
+      if (blacklisted.has(a)) continue;
+      const t = (a.textContent || '').trim();
+      if (authorName && t.toLowerCase() === authorName.toLowerCase()) {
+        authorEl = a;
+        break;
+      }
+      if (t.length > 2 && !/(reels|watch|explore|feed|home|ফলো|follow)/i.test(t)) {
+        const href = a.getAttribute('href') || '';
+        if (!href.includes('/reel/') && !href.includes('/watch') && !href.includes('/hashtag/') && href.length > 15) {
+          authorEl = a;
+          break;
+        }
+      }
+    }
+
+    if (authorEl) {
+      let infoCard = authorEl.parentElement;
+      for (let depth = 0; depth < 5 && infoCard && infoCard !== root; depth++) {
+        const nodes = infoCard.querySelectorAll('div[dir="auto"], span[dir="auto"]');
+        for (const node of nodes) {
+          if (blacklisted.has(node)) continue;
+          if (node.closest('[role="button"]') || node.closest('[role="toolbar"]') || node.closest('a[role="link"]')) continue;
+          if (node.closest('[aria-label*="audio" i], [aria-label*="music" i], [aria-label*="গান" i]')) continue;
+
+          const text = (node.innerText || node.textContent || '').trim();
+          if (!text || text.length < 3) continue;
+          if (authorName && text.toLowerCase() === authorName.toLowerCase()) continue;
+          if (/^(like|comment|share|follow|views|view|ফলো|লাইক|মন্তব্য|শেয়ার|original audio|audio|sound|অরিজিনাল অডিও)$/i.test(text)) continue;
+          if (/(original audio|original sound|অরিজিনাল অডিও|অরিজিনাল সাউন্ড)/i.test(text) && text.length < 40) continue;
+          if (/^[০-৯0-9.,KMBkmbহাজারলাখকোটি]+$/.test(text)) continue;
+          if (/^(?:[0-9]+[hd]|yesterday|just now|Recent|এইমাত্র|গতকাল)/i.test(text) && text.length < 20) continue;
+          if (/(assalamu\s*alaikum|thanks for your interest|reply to|chat with)/i.test(text) && text.includes('Tanvir')) continue;
+
+          const cleaned = this.cleanCaptionText(text);
+          if (cleaned.length > 0) {
+            return cleaned;
+          }
+        }
+        infoCard = infoCard.parentElement;
+      }
+    }
+
+    // B. Candidate traversal strictly scoped to root (active container)
+    const candidateNodes = root.querySelectorAll('div[dir="auto"], span[dir="auto"]');
     let bestCaption = '';
 
     for (const node of candidateNodes) {
-      if (commentElements.has(node)) continue;
+      if (blacklisted.has(node)) continue;
       if (
         node.closest('[role="article"]') ||
         node.closest('form') ||
         node.closest('ul') ||
         node.closest('[role="button"]') ||
-        node.closest('[aria-label*="Comment"]') ||
-        node.closest('[aria-label*="মন্তব্য"]')
+        node.closest('[role="toolbar"]') ||
+        node.closest('[role="complementary"]') ||
+        node.closest('[role="region"]') ||
+        node.closest('[aria-label*="Chat" i]') ||
+        node.closest('[aria-label*="Messenger" i]') ||
+        node.closest('[aria-label*="Comment" i]') ||
+        node.closest('[aria-label*="মন্তব্য"]') ||
+        node.closest('[aria-label*="audio" i], [aria-label*="music" i], [aria-label*="গান" i]')
       ) {
         continue;
       }
 
       const text = (node.innerText || node.textContent || '').trim();
       if (!text || text.length < 3) continue;
+      if (authorName && text.toLowerCase() === authorName.toLowerCase()) continue;
 
-      // Filter out navigation/action strings and pure numbers
-      if (/^(like|comment|share|follow|views|view|ফলো|লাইক|মন্তব্য|শেয়ার|original audio|audio)$/i.test(text)) continue;
+      if (/^(like|comment|share|follow|views|view|ফলো|লাইক|মন্তব্য|শেয়ার|original audio|original sound|audio|sound|অরিজিনাল অডিও)$/i.test(text)) continue;
+      if (/(original audio|original sound|অরিজিনাল অডিও|অরিজিনাল সাউন্ড)/i.test(text) && text.length < 40) continue;
       if (/^[০-৯0-9.,KMBkmbহাজারলাখকোটি]+$/.test(text)) continue;
+      if (/^(?:[0-9]+[hd]|yesterday|just now|Recent|এইমাত্র|গতকাল)/i.test(text) && text.length < 20) continue;
+      if (/(assalamu\s*alaikum|thanks for your interest|reply to|chat with)/i.test(text) && text.includes('Tanvir')) continue;
 
       if (text.length > bestCaption.length && !/(like|comment|share|reels|follow|ফলো|লাইক|মন্তব্য)/i.test(text)) {
         bestCaption = text;
@@ -338,12 +549,18 @@ const ReelsExtractor = {
     }
 
     if (bestCaption) {
-      return Parser.cleanText(bestCaption);
+      return this.cleanCaptionText(bestCaption);
     }
 
-    const metaDesc = document.querySelector('meta[property="og:description"]');
-    if (metaDesc && metaDesc.content) {
-      return Parser.cleanText(metaDesc.content);
+    // C. Meta tag fallback
+    if (typeof document !== 'undefined') {
+      const metaDesc = document.querySelector('meta[property="og:description"]');
+      if (metaDesc && metaDesc.content) {
+        const desc = metaDesc.content.trim();
+        if (!desc.includes('Watch the latest reel') && !desc.includes('Facebook')) {
+          return this.cleanCaptionText(desc);
+        }
+      }
     }
 
     return '';
@@ -351,6 +568,7 @@ const ReelsExtractor = {
 
   /**
    * Scans Facebook Relay JSON script tags for exact metrics and timestamps
+   * STRICT: ONLY inspects scripts that explicitly reference reelId!
    */
   extractFromRelayScripts(reelId) {
     const data = {
@@ -362,17 +580,19 @@ const ReelsExtractor = {
       creationTime: null
     };
 
+    if (!reelId || typeof document === 'undefined') return data;
+
     try {
       const scripts = document.querySelectorAll('script[type="application/json"]');
       if (!scripts || scripts.length === 0) return data;
 
       for (const script of scripts) {
         const content = script.textContent;
-        if (!content || (!content.includes('feedback') && !content.includes('reaction_count') && !content.includes('playable_duration_in_ms') && !content.includes('creation_time'))) {
-          continue;
+        if (!content || !content.includes(reelId)) {
+          continue; // MUST belong to THIS reel
         }
 
-        // 1. Reactions: "reaction_count":{"count": 1245} or "total_reaction_count": 1245
+        // 1. Reactions
         if (data.reactions === 0) {
           const mReact = content.match(/["']reaction_count["']\s*:\s*(?:\{\s*["']count["']\s*:\s*(\d+)|(\d+))/);
           if (mReact) {
@@ -384,7 +604,7 @@ const ReelsExtractor = {
           }
         }
 
-        // 2. Comments: "total_comment_count": 45 or "comment_count":{"total_count": 45}
+        // 2. Comments
         if (data.comments === 0) {
           const mComm = content.match(/["'](?:total_comment_count|comment_count|comments)["']\s*:\s*(?:\{\s*["']total_count["']\s*:\s*(\d+)|(\d+))/);
           if (mComm) {
@@ -396,7 +616,7 @@ const ReelsExtractor = {
           }
         }
 
-        // 3. Shares: "share_count":{"count": 12} or "share_count_num": 12
+        // 3. Shares
         if (data.shares === 0) {
           const mShare = content.match(/["'](?:share_count|share_count_num)["']\s*:\s*(?:\{\s*["']count["']\s*:\s*(\d+)|(\d+))/);
           if (mShare) {
@@ -435,56 +655,187 @@ const ReelsExtractor = {
   },
 
   /**
-   * Extracts reaction, comment, share, and view counts from active player
+   * Helper to extract numerical count from an action button (Like, Comment, Share)
+   * Examines aria-label, inner text, sibling spans, and parent container.
    */
-  extractPlayerMetrics(reelId) {
-    // 1. Primary: In-page Relay JSON scripts (exact unrounded numbers)
-    const relay = this.extractFromRelayScripts(reelId);
-    let reactions = relay.reactions || 0;
-    let comments = relay.comments || 0;
-    let shares = relay.shares || 0;
-    let views = this.gridViewsMap.get(reelId) || relay.views || 0;
+  extractCountFromActionButton(btn) {
+    if (!btn) return 0;
 
-    // 2. Secondary / DOM: Inspect action buttons and count labels
-    const actionButtons = document.querySelectorAll(
-      'div[role="button"][aria-label], span[role="button"][aria-label], a[role="button"][aria-label], div[role="button"]'
+    // 1. Check aria-label directly (e.g. "3.8K reactions", "41 comments", "74 shares")
+    const aria = (btn.getAttribute('aria-label') || '').trim();
+    if (aria && !/(?:play|pause|volume|mute|close|back|more options|next|previous|reply)/i.test(aria)) {
+      const ariaNum = Parser.parseMetric(aria);
+      if (ariaNum > 0) return ariaNum;
+    }
+
+    // 2. Check inner text or spans inside the button
+    const innerSpans = btn.querySelectorAll('span, div');
+    for (const s of innerSpans) {
+      const txt = (s.innerText || s.textContent || '').trim();
+      if (txt && txt.length < 35 && !/^[0-9]+:[0-9]+/.test(txt) && !/(?:ago|ঘণ্টা|দিন|view|ভিউ)/i.test(txt)) {
+        const val = Parser.parseMetric(txt);
+        if (val > 0) return val;
+      }
+    }
+
+    // 3. Check sibling element (very common layout: button icon is above count span)
+    let sibling = btn.nextElementSibling;
+    while (sibling) {
+      const txt = (sibling.innerText || sibling.textContent || '').trim();
+      if (txt && txt.length < 35 && !/^[0-9]+:[0-9]+/.test(txt) && !/(?:ago|ঘণ্টা|দিন|view|ভিউ)/i.test(txt)) {
+        const val = Parser.parseMetric(txt);
+        if (val > 0) return val;
+      }
+      sibling = sibling.nextElementSibling;
+    }
+
+    // 4. Check parent container's child spans and parent full text
+    const parent = btn.parentElement;
+    if (parent) {
+      const parentSpans = parent.querySelectorAll('span, div');
+      for (const s of parentSpans) {
+        if (btn.contains(s)) continue;
+        const txt = (s.innerText || s.textContent || '').trim();
+        if (txt && txt.length < 35 && !/^[0-9]+:[0-9]+/.test(txt) && !/(?:ago|ঘণ্টা|দিন|view|ভিউ)/i.test(txt)) {
+          const val = Parser.parseMetric(txt);
+          if (val > 0) return val;
+        }
+      }
+
+      // Check parent's full text
+      const parentText = (parent.innerText || parent.textContent || '').trim();
+      if (parentText && parentText.length < 40 && !/^[0-9]+:[0-9]+/.test(parentText) && !/(?:ago|ঘণ্টা|দিন|view|ভিউ)/i.test(parentText)) {
+        const val = Parser.parseMetric(parentText);
+        if (val > 0) return val;
+      }
+    }
+
+    return 0;
+  },
+
+  /**
+   * Extracts reaction, comment, share, and view counts from active player
+   * STRICTLY reads authentic metrics from the visible action toolbar inside the active container.
+   * NEVER queries global document buttons to prevent picking up stray recommendation counts.
+   */
+  extractPlayerMetrics(reelId, activeContainer = null) {
+    let reactions = 0;
+    let comments = 0;
+    let shares = 0;
+    let views = this.gridViewsMap.get(reelId) || 0;
+
+    // 1. Check Relay scripts for authoritative metrics first
+    if (reelId) {
+      const relay = this.extractFromRelayScripts(reelId);
+      if (relay) {
+        if (relay.reactions > 0) reactions = relay.reactions;
+        if (relay.comments > 0) comments = relay.comments;
+        if (relay.shares > 0) shares = relay.shares;
+        if (relay.views > 0 && views === 0) views = relay.views;
+      }
+    }
+
+    const root = activeContainer || this.getActiveReelContainer();
+    if (!root) return { reactions, comments, shares, views };
+
+    // 2. STRATEGY 1: Dedicated Reel Action Toolbar inside active container
+    let foundToolbarWithShare = false;
+    const toolbarContainers = root.querySelectorAll(
+      'div[role="toolbar"], div[data-pagelet*="Reel"] div, div[role="main"] div'
     );
 
-    actionButtons.forEach(btn => {
-      const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-      // Look for count inside button or its immediate container
-      const container = btn.closest('div[role="toolbar"]') || btn.parentElement;
-      const countSpan = btn.querySelector('span[dir="auto"]') ||
-                        btn.nextElementSibling ||
-                        container?.querySelector('span[dir="auto"]');
-
-      const countText = countSpan ? (countSpan.textContent || '').trim() : '';
-      let num = Parser.parseMetric(countText);
-      if (num === 0) num = Parser.parseMetric(aria);
-      if (num === 0 && container) {
-        num = Parser.parseMetric(container.textContent || '');
+    for (const container of toolbarContainers) {
+      // Must not be inside comments, chat docks, or forms
+      if (
+        container.closest('[role="article"]') ||
+        container.closest('form') ||
+        container.closest('[role="complementary"]') ||
+        container.closest('[role="region"]') ||
+        container.closest('[aria-label*="Chat" i]')
+      ) {
+        continue;
       }
 
-      // Reactions: Like, Heart, Reactions, etc.
-      if (/(?:like|reaction|лайк|লাইক|প্রতিক্রিয়া|me gusta|react)/i.test(aria)) {
-        if (num > reactions) reactions = num;
-      }
+      const likeBtn = container.querySelector(
+        'div[role="button"][aria-label*="like" i], div[role="button"][aria-label*="লাইক" i], div[role="button"][aria-label*="reaction" i], div[role="button"][aria-label*="react" i], div[role="button"][aria-label*="love" i], span[role="button"][aria-label*="like" i]'
+      );
+      const commentBtn = container.querySelector(
+        'div[role="button"][aria-label*="comment" i], div[role="button"][aria-label*="মন্তব্য" i], span[role="button"][aria-label*="comment" i]'
+      );
+      const shareBtn = container.querySelector(
+        'div[role="button"][aria-label*="share" i], div[role="button"][aria-label*="শেয়ার" i], div[role="button"][aria-label*="শেয়ার" i], div[role="button"][aria-label*="send this" i], span[role="button"][aria-label*="share" i]'
+      );
 
-      // Comments
-      if (/(?:comment|মন্তব্য|comentar)/i.test(aria)) {
-        if (num > comments) comments = num;
-      }
+      if (likeBtn || commentBtn || shareBtn) {
+        if (likeBtn && reactions === 0) {
+          reactions = this.extractCountFromActionButton(likeBtn);
+        }
+        if (commentBtn && comments === 0) {
+          comments = this.extractCountFromActionButton(commentBtn);
+        }
+        if (shareBtn) {
+          foundToolbarWithShare = true;
+          if (shares === 0) {
+            shares = this.extractCountFromActionButton(shareBtn);
+            // If share button is present and displays no number, it is authentically 0!
+          }
+        }
 
-      // Shares
-      if (/(?:share|শেয়ার|শেয়ার|compartir|send this to friends)/i.test(aria)) {
-        if (num > shares) shares = num;
+        if (reactions > 0 || comments > 0 || shares > 0 || foundToolbarWithShare) {
+          break;
+        }
       }
-    });
+    }
 
-    // 3. Comments Drawer Header scan (if open or rendered in DOM)
+    // 3. STRATEGY 2: Scoped Action Buttons inside active container ONLY (never global document)
+    // Only search for shares if no toolbar with a share button was found
+    if (reactions === 0 || comments === 0 || (!foundToolbarWithShare && shares === 0)) {
+      const actionButtons = root.querySelectorAll(
+        'div[role="button"][aria-label], span[role="button"][aria-label], a[role="button"][aria-label]'
+      );
+
+      actionButtons.forEach(btn => {
+        if (
+          btn.closest('[role="article"]') ||
+          btn.closest('form') ||
+          btn.closest('[role="complementary"]') ||
+          btn.closest('[role="region"]') ||
+          btn.closest('[aria-label*="Chat" i]')
+        ) {
+          return;
+        }
+
+        const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+
+        // Likes / Reactions
+        if (reactions === 0 && /(?:like|reaction|লাইক|প্রতিক্রিয়া|react\b|love\b)/i.test(aria)) {
+          if (!/(?:unlike|dislike|reply)/i.test(aria)) {
+            const val = this.extractCountFromActionButton(btn);
+            if (val > 0) reactions = val;
+          }
+        }
+
+        // Comments
+        if (comments === 0 && /(?:comment|মন্তব্য)/i.test(aria)) {
+          if (!/(?:write|close|reply|comment as)/i.test(aria)) {
+            const val = this.extractCountFromActionButton(btn);
+            if (val > 0) comments = val;
+          }
+        }
+
+        // Shares - ONLY if foundToolbarWithShare is false
+        if (!foundToolbarWithShare && shares === 0 && /(?:share|শেয়ার|শেয়ার|send this to friends)/i.test(aria)) {
+          const val = this.extractCountFromActionButton(btn);
+          if (val > 0) shares = val;
+        }
+      });
+    }
+
+    // 4. STRATEGY 3: Comments Drawer Header scan (scoped to active container)
     if (comments === 0) {
-      const commentHeaders = document.querySelectorAll('h2, h3, span[dir="auto"], div[dir="auto"]');
+      const commentHeaders = root.querySelectorAll('h2, h3, span[dir="auto"], div[dir="auto"]');
       for (const el of commentHeaders) {
+        if (el.closest('form') || el.closest('button') || el.closest('[role="region"]')) continue;
         const txt = (el.textContent || '').trim();
         if (/(?:comments|মন্তব্য|টি মন্তব্য)\b/i.test(txt) && txt.length < 30) {
           const parsed = Parser.parseMetric(txt);
@@ -496,39 +847,13 @@ const ReelsExtractor = {
       }
     }
 
-    // 4. Positional fallback for Reel Action Bar:
-    // Vertical action bar beside reel video has standard order: 1st Like, 2nd Comment, 3rd Share
-    if (reactions === 0 || comments === 0) {
-      const actionColumns = document.querySelectorAll(
-        'div[data-pagelet*="Reel"] div, div[role="dialog"] div, div[role="main"] div'
-      );
-      for (const col of actionColumns) {
-        const buttons = col.querySelectorAll(':scope > div > div[role="button"], :scope > div[role="button"]');
-        if (buttons.length >= 2 && buttons.length <= 6) {
-          const counts = [];
-          buttons.forEach(b => {
-            const span = b.querySelector('span') || b.parentElement?.querySelector('span');
-            if (span) {
-              const val = Parser.parseMetric(span.textContent || '');
-              counts.push(val);
-            }
-          });
-          if (counts.length >= 2 && counts[0] > 0) {
-            if (reactions === 0) reactions = counts[0];
-            if (comments === 0 && counts.length > 1) comments = counts[1];
-            if (shares === 0 && counts.length > 2) shares = counts[2];
-            break;
-          }
-        }
-      }
-    }
-
-    // 5. Views fallback from DOM if still 0
+    // 5. STRATEGY 4: Views fallback from active container if still 0
     if (views === 0) {
-      const viewNodes = document.querySelectorAll('span, div');
+      const viewNodes = root.querySelectorAll('span, div');
       for (const node of viewNodes) {
+        if (node.closest('[role="article"]') || node.closest('form') || node.closest('[role="region"]')) continue;
         const t = (node.textContent || '').trim();
-        if (/(?:views|view|ভিউ|বার দেখা হয়েছে)/i.test(t) && t.length < 30) {
+        if (/(?:views|view|ভিউ|বার দেখা হয়েছে|plays|প্লে)/i.test(t) && t.length < 30) {
           const parsed = Parser.parseMetric(t);
           if (parsed > 0) {
             views = parsed;
@@ -544,10 +869,12 @@ const ReelsExtractor = {
   /**
    * Extracts media URL and formatted video length ('3 min 5 sec', '30 min 43 sec', etc.)
    */
-  extractPlayerMedia(reelId = null) {
+  extractPlayerMedia(reelId = null, activeContainer = null) {
     let mediaUrl = '';
     let thumbnail = '';
     let videoLength = 'N/A';
+
+    const root = activeContainer || this.getActiveReelContainer();
 
     // 1. Check Relay JSON scripts first
     if (reelId) {
@@ -558,7 +885,7 @@ const ReelsExtractor = {
     }
 
     // 2. Check HTML5 <video> element
-    const video = document.querySelector('video');
+    const video = root ? root.querySelector('video') : (typeof document !== 'undefined' ? document.querySelector('video') : null);
     if (video) {
       if (video.poster) {
         thumbnail = video.poster;
@@ -573,8 +900,8 @@ const ReelsExtractor = {
     }
 
     // 3. Check player seekbar / progressbar
-    if (videoLength === 'N/A') {
-      const progress = document.querySelector('div[role="progressbar"], div[aria-valuemax]');
+    if (videoLength === 'N/A' && root) {
+      const progress = root.querySelector('div[role="progressbar"], div[aria-valuemax]');
       if (progress) {
         const max = parseFloat(progress.getAttribute('aria-valuemax'));
         if (!isNaN(max) && max > 0 && max < 7200 && max !== 100) {
@@ -584,8 +911,8 @@ const ReelsExtractor = {
     }
 
     // 4. Check time text in player controls (e.g. "0:15 / 3:05")
-    if (videoLength === 'N/A') {
-      const timeSpans = document.querySelectorAll('span, div');
+    if (videoLength === 'N/A' && root) {
+      const timeSpans = root.querySelectorAll('span, div');
       for (const span of timeSpans) {
         const text = (span.textContent || '').trim();
         const match = text.match(/\/\s*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)/);
@@ -602,8 +929,8 @@ const ReelsExtractor = {
       }
     }
 
-    if (!thumbnail) {
-      const img = document.querySelector('img[src*="scontent"], img[src*="fbcdn"]');
+    if (!thumbnail && root) {
+      const img = root.querySelector('img[src*="scontent"], img[src*="fbcdn"]');
       if (img) {
         thumbnail = img.src;
         if (!mediaUrl) mediaUrl = img.src;
@@ -617,7 +944,7 @@ const ReelsExtractor = {
    * Extracts published date as relative time length:
    * e.g., '5hr ago', '3 days ago', '2 month ago', '1 year ago'
    */
-  extractPlayerPostedDate(reelId = null) {
+  extractPlayerPostedDate(reelId = null, activeContainer = null) {
     // 1. Check Relay JSON scripts for exact creation_time / publish_time
     if (reelId) {
       const relay = this.extractFromRelayScripts(reelId);
@@ -627,21 +954,33 @@ const ReelsExtractor = {
     }
 
     // 2. Check meta article:published_time
-    const metaDate = document.querySelector('meta[property="article:published_time"]');
-    if (metaDate && metaDate.content) {
-      const relative = Parser.formatTimeAgo(metaDate.content);
-      if (relative && relative !== 'Recent') {
-        return relative;
+    if (typeof document !== 'undefined') {
+      const metaDate = document.querySelector('meta[property="article:published_time"]');
+      if (metaDate && metaDate.content) {
+        const relative = Parser.formatTimeAgo(metaDate.content);
+        if (relative && relative !== 'Recent') {
+          return relative;
+        }
       }
     }
 
+    const root = activeContainer || this.getActiveReelContainer();
+    if (!root) return 'Recent';
+
     // 3. Search header timestamp anchors and spans near author
-    const headerAnchors = document.querySelectorAll(
+    const headerAnchors = root.querySelectorAll(
       'a[role="link"][href*="/reel/"], a[role="link"][href*="/videos/"], a[role="link"][href*="/posts/"], abbr'
     );
 
     for (const a of headerAnchors) {
-      if (a.closest('[role="article"]') || a.closest('form')) continue;
+      if (
+        a.closest('[role="article"]') ||
+        a.closest('form') ||
+        a.closest('[role="region"]') ||
+        a.closest('[aria-label*="Chat" i]')
+      ) {
+        continue;
+      }
 
       if (a.tagName.toLowerCase() === 'abbr') {
         const title = a.getAttribute('title') || '';
@@ -670,9 +1009,16 @@ const ReelsExtractor = {
     }
 
     // 4. Broader header search: spans adjacent to author header or dot separator (·)
-    const allSpans = document.querySelectorAll('span[dir="auto"]');
+    const allSpans = root.querySelectorAll('span[dir="auto"]');
     for (const s of allSpans) {
-      if (s.closest('[role="article"]') || s.closest('form') || s.closest('button') || s.closest('[role="button"]')) {
+      if (
+        s.closest('[role="article"]') ||
+        s.closest('form') ||
+        s.closest('button') ||
+        s.closest('[role="button"]') ||
+        s.closest('[role="region"]') ||
+        s.closest('[aria-label*="Chat" i]')
+      ) {
         continue;
       }
       const t = (s.textContent || '').trim();
