@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "FB data collector by NUR",
+  "version": "1.1.0",
+  "description": "Advanced Facebook data collector by NUR - extracts posts, reels, full captions, reaction metrics, comments, shares, views, video length, and share links.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "downloads"
+  ],
+  "host_permissions": [
+    "*://*.facebook.com/*"
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "FB data collector by NUR",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_page": "dashboard/dashboard.html",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.facebook.com/*"
+      ],
+      "js": [
+        "utils/parser.js",
+        "content/extractor-posts.js",
+        "content/extractor-reels.js",
+        "content/scroll-manager.js",
+        "content/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

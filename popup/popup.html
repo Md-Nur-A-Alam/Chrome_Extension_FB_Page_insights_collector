@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FB data collector by NUR</title>
+  <link rel="stylesheet" href="popup.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Hind+Siliguri:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header with Highlighted NUR Branding -->
+    <header class="header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>FB Collector by <span class="nur-highlight">NUR</span></h1>
+          <span class="badge badge-version">v1.1</span>
+        </div>
+      </div>
+      <button id="openDashboardHeaderBtn" class="icon-btn" title="Open Full Dashboard">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="3" y1="9" x2="21" y2="9"></line>
+          <line x1="9" y1="21" x2="9" y2="9"></line>
+        </svg>
+      </button>
+    </header>
+
+    <!-- Not On Facebook Warning Notice -->
+    <div id="notFacebookNotice" class="glass-card notice-card hidden">
+      <div class="notice-icon">⚠️</div>
+      <div class="notice-body">
+        <h4>Facebook Tab Required</h4>
+        <p>Navigate to any Facebook Page timeline or Reels tab to extract posts & reels.</p>
+        <button id="openFbBtn" class="btn btn-secondary btn-sm">Go to Facebook</button>
+      </div>
+    </div>
+
+    <!-- Active Controls Section -->
+    <main id="collectorControls" class="content-section">
+      <!-- Target Page Info Card -->
+      <div class="glass-card page-info-card">
+        <div class="page-meta">
+          <span class="pulse-indicator"></span>
+          <div class="page-details">
+            <div id="detectedPageTitle" class="page-name truncate">Detecting Page...</div>
+            <div id="detectedPageType" class="page-sub">Auto-detecting tab</div>
+          </div>
+        </div>
+        <span id="modeBadge" class="tag tag-blue">Posts Mode</span>
+      </div>
+
+      <!-- Settings Panel -->
+      <div class="settings-grid">
+        <!-- Collection Target -->
+        <div class="setting-item">
+          <label for="targetCountInput">Target Count</label>
+          <div class="input-with-presets">
+            <input type="number" id="targetCountInput" min="1" max="1000" value="50">
+            <div class="preset-pills">
+              <button type="button" class="pill-btn" data-val="25">25</button>
+              <button type="button" class="pill-btn active" data-val="50">50</button>
+              <button type="button" class="pill-btn" data-val="100">100</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mode & Speed Controls -->
+        <div class="setting-row">
+          <div class="setting-item flex-1">
+            <label for="modeSelect">Collection Mode</label>
+            <select id="modeSelect" class="styled-select">
+              <option value="auto">Auto Detect</option>
+              <option value="posts">Posts Feed</option>
+              <option value="reels">Reels (Full Details)</option>
+            </select>
+          </div>
+          <div class="setting-item flex-1">
+            <label for="speedSelect">Pacing / Safe</label>
+            <select id="speedSelect" class="styled-select">
+              <option value="1500" selected>Balanced (1.5s)</option>
+              <option value="2500">Safe (2.5s)</option>
+              <option value="800">Fast (0.8s)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Progress Bar -->
+      <div class="progress-section">
+        <div class="progress-header">
+          <span id="statusLabel" class="status-label">Ready to collect</span>
+          <span id="counterLabel" class="counter-label">0 / 50</span>
+        </div>
+        <div class="progress-bar-container">
+          <div id="progressBar" class="progress-bar" style="width: 0%;"></div>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="actions-grid">
+        <button id="startBtn" class="btn btn-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+          Start Collecting
+        </button>
+        <button id="pauseBtn" class="btn btn-warning hidden">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="4" width="4" height="16"></rect>
+            <rect x="14" y="4" width="4" height="16"></rect>
+          </svg>
+          Pause
+        </button>
+        <button id="resumeBtn" class="btn btn-primary hidden">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+          Resume
+        </button>
+        <button id="stopBtn" class="btn btn-danger hidden">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="5" y="5" width="14" height="14"></rect>
+          </svg>
+          Stop
+        </button>
+      </div>
+
+      <!-- Live Preview Card (Latest Harvested Item) -->
+      <div id="previewCard" class="glass-card preview-card hidden">
+        <div class="preview-header">
+          <span class="preview-tag">Latest Harvested</span>
+          <div class="preview-tags">
+            <span id="previewDuration" class="tag tag-dim hidden">⏱ 0:00</span>
+            <span id="previewType" class="tag tag-sm">Post</span>
+          </div>
+        </div>
+        <div id="previewText" class="preview-text truncate-2">No items yet...</div>
+        <div class="preview-stats">
+          <span title="Views">👁️ <span id="previewViews">0</span></span>
+          <span title="Reactions / Likes">👍 <span id="previewReactions">0</span></span>
+          <span title="Comments">💬 <span id="previewComments">0</span></span>
+          <span title="Shares">🔄 <span id="previewShares">0</span></span>
+        </div>
+      </div>
+    </main>
+
+    <!-- Footer Bar with Quick Exports & Full Dashboard Trigger -->
+    <footer class="footer">
+      <button id="openDashboardBtn" class="btn btn-glass w-full">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+          <line x1="8" y1="21" x2="16" y2="21"></line>
+          <line x1="12" y1="17" x2="12" y2="21"></line>
+        </svg>
+        Open Full Dashboard
+      </button>
+
+      <div class="export-row">
+        <button id="exportCsvBtn" class="btn btn-outline btn-sm" title="Download Excel CSV with Bangla, Emojis & Video Length">
+          📥 CSV
+        </button>
+        <button id="exportJsonBtn" class="btn btn-outline btn-sm" title="Download JSON file">
+          { } JSON
+        </button>
+        <button id="copyClipboardBtn" class="btn btn-outline btn-sm" title="Copy Table to Clipboard">
+          📋 Copy
+        </button>
+      </div>
+    </footer>
+  </div>
+
+  <script src="../utils/parser.js"></script>
+  <script src="../utils/exporter.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
