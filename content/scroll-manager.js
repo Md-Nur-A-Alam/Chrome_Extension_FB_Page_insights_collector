@@ -262,7 +262,12 @@ class ScrollManager {
       this.pageAuthorInfo = pageAuthor;
       this.targetCount = queue.length;
       this.delayMs = delayMs;
-      queue.forEach(item => this.collectedMap.set(item.id, item));
+      queue.forEach(item => {
+        this.collectedMap.set(item.id, item);
+        if (item.views > 0) {
+          ReelsExtractor.gridViewsMap.set(item.id, item.views);
+        }
+      });
 
       await this.handleActiveReelPage(queue, index, pageAuthor, originUrl, delayMs);
     });
@@ -282,30 +287,44 @@ class ScrollManager {
     console.log(`[FB-Collector] Phase 2: Collecting ${progressLabel}: ID=${currentReel.id}, URL=${window.location.href}`);
     this.broadcastState(`Phase 2: Collecting ${progressLabel}...`);
 
-    // 1. Wait for video, caption, reactions, comments to render in the DOM
-    const waitTime = Math.max(1600, delayMs);
-    await new Promise(r => setTimeout(r, waitTime));
+    // 1. Initial pause for DOM and React to mount
+    await new Promise(r => setTimeout(r, 600));
 
-    // 2. Check if user stopped the collection while waiting
-    const stateCheck = await new Promise(r => {
-      chrome.storage.local.get(['fb_reels_queue_active'], r);
-    });
-    if (!stateCheck || !stateCheck.fb_reels_queue_active) {
-      console.log('[FB-Collector] Queue halted by user request.');
-      this.status = 'stopped';
-      return;
+    // 2. Adaptive polling: wait for Relay scripts or action bar DOM to render metrics
+    let details = null;
+    const pollStart = Date.now();
+    const maxPollMs = Math.max(3000, delayMs + 1200);
+
+    while (Date.now() - pollStart < maxPollMs) {
+      // Check if user stopped collection
+      const stateCheck = await new Promise(r => {
+        chrome.storage.local.get(['fb_reels_queue_active'], r);
+      });
+      if (!stateCheck || !stateCheck.fb_reels_queue_active) {
+        console.log('[FB-Collector] Queue halted by user request.');
+        this.status = 'stopped';
+        return;
+      }
+
+      details = ReelsExtractor.scrapeActivePlayer(currentReel.id, currentReel.url, pageAuthor);
+
+      // If we got non-zero reactions or comments and a relative date or video length, we are ready!
+      if ((details.reactions > 0 || details.comments > 0) && details.publishedDate !== 'Recent' && details.videoLength !== 'N/A') {
+        break;
+      }
+      // If we got engagement metrics, break early
+      if (details.reactions > 0 || details.comments > 0) {
+        break;
+      }
+
+      await new Promise(r => setTimeout(r, 350));
     }
 
-    // 3. Scrape active player metrics
-    let details = ReelsExtractor.scrapeActivePlayer(currentReel.id, currentReel.url, pageAuthor);
-
-    // If initial scan didn't capture reactions or comments yet, give a brief retry (e.g. slow network)
-    if (details.reactions === 0 && details.comments === 0) {
-      await new Promise(r => setTimeout(r, 800));
+    if (!details) {
       details = ReelsExtractor.scrapeActivePlayer(currentReel.id, currentReel.url, pageAuthor);
     }
 
-    // 4. Merge deep details into current reel object
+    // 3. Merge deep details into current reel object
     currentReel.authorName = details.authorName || currentReel.authorName;
     currentReel.authorHandle = details.authorHandle || currentReel.authorHandle;
     currentReel.authorAvatar = details.authorAvatar || currentReel.authorAvatar;
@@ -319,15 +338,19 @@ class ScrollManager {
     currentReel.mediaUrl = details.mediaUrl || currentReel.mediaUrl;
     currentReel.thumbnail = details.thumbnail || currentReel.thumbnail;
     currentReel.images = details.images || currentReel.images;
-    currentReel.videoLength = details.videoLength || currentReel.videoLength;
-    currentReel.publishedDate = details.publishedDate || currentReel.publishedDate;
-    currentReel.postedAt = details.postedAt || currentReel.postedAt;
+    if (details.videoLength && details.videoLength !== 'N/A') {
+      currentReel.videoLength = details.videoLength;
+    }
+    if (details.publishedDate && details.publishedDate !== 'Recent') {
+      currentReel.publishedDate = details.publishedDate;
+      currentReel.postedAt = details.publishedDate;
+    }
     currentReel.isEnriched = true;
 
     queue[index] = currentReel;
     this.collectedMap.set(currentReel.id, currentReel);
 
-    // 5. Update chrome.storage.local with enriched item and current state
+    // 4. Update chrome.storage.local with enriched item and current state
     await new Promise(r => {
       chrome.storage.local.set({
         fb_reels_queue: queue,
@@ -342,7 +365,8 @@ class ScrollManager {
       }, r);
     });
 
-    this.broadcastState(`Phase 2: Collected ${progressLabel} · ${currentReel.reactions} Likes, ${currentReel.comments} Comments`);
+    const lengthSuffix = currentReel.videoLength && currentReel.videoLength !== 'N/A' ? ` · ⏱ ${currentReel.videoLength}` : '';
+    this.broadcastState(`Phase 2: Collected ${progressLabel} · ${currentReel.reactions} Likes, ${currentReel.comments} Comments${lengthSuffix}`);
 
     // 6. Check if more reels remain in the queue
     const nextIndex = index + 1;

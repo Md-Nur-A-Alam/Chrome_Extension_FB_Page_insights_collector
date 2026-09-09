@@ -180,10 +180,10 @@ const ReelsExtractor = {
     const metrics = this.extractPlayerMetrics(id);
 
     // 5. Media URL & Video Info
-    const mediaInfo = this.extractPlayerMedia();
+    const mediaInfo = this.extractPlayerMedia(id);
 
     // 6. Posted At Date
-    const postedAt = this.extractPlayerPostedDate();
+    const postedAt = this.extractPlayerPostedDate(id);
 
     return {
       id,
@@ -350,62 +350,185 @@ const ReelsExtractor = {
   },
 
   /**
+   * Scans Facebook Relay JSON script tags for exact metrics and timestamps
+   */
+  extractFromRelayScripts(reelId) {
+    const data = {
+      reactions: 0,
+      comments: 0,
+      shares: 0,
+      views: 0,
+      videoLengthSec: 0,
+      creationTime: null
+    };
+
+    try {
+      const scripts = document.querySelectorAll('script[type="application/json"]');
+      if (!scripts || scripts.length === 0) return data;
+
+      for (const script of scripts) {
+        const content = script.textContent;
+        if (!content || (!content.includes('feedback') && !content.includes('reaction_count') && !content.includes('playable_duration_in_ms') && !content.includes('creation_time'))) {
+          continue;
+        }
+
+        // 1. Reactions: "reaction_count":{"count": 1245} or "total_reaction_count": 1245
+        if (data.reactions === 0) {
+          const mReact = content.match(/["']reaction_count["']\s*:\s*(?:\{\s*["']count["']\s*:\s*(\d+)|(\d+))/);
+          if (mReact) {
+            data.reactions = parseInt(mReact[1] || mReact[2], 10) || 0;
+          }
+          if (data.reactions === 0) {
+            const mTotalReact = content.match(/["']total_reaction_count["']\s*:\s*(\d+)/);
+            if (mTotalReact) data.reactions = parseInt(mTotalReact[1], 10) || 0;
+          }
+        }
+
+        // 2. Comments: "total_comment_count": 45 or "comment_count":{"total_count": 45}
+        if (data.comments === 0) {
+          const mComm = content.match(/["'](?:total_comment_count|comment_count|comments)["']\s*:\s*(?:\{\s*["']total_count["']\s*:\s*(\d+)|(\d+))/);
+          if (mComm) {
+            data.comments = parseInt(mComm[1] || mComm[2], 10) || 0;
+          }
+          if (data.comments === 0) {
+            const mCommAlt = content.match(/["']comments_count_summary_renderer["'][\s\S]*?["']total_count["']\s*:\s*(\d+)/);
+            if (mCommAlt) data.comments = parseInt(mCommAlt[1], 10) || 0;
+          }
+        }
+
+        // 3. Shares: "share_count":{"count": 12} or "share_count_num": 12
+        if (data.shares === 0) {
+          const mShare = content.match(/["'](?:share_count|share_count_num)["']\s*:\s*(?:\{\s*["']count["']\s*:\s*(\d+)|(\d+))/);
+          if (mShare) {
+            data.shares = parseInt(mShare[1] || mShare[2], 10) || 0;
+          }
+        }
+
+        // 4. Video duration
+        if (data.videoLengthSec === 0) {
+          const mDurMs = content.match(/["']playable_duration_in_ms["']\s*:\s*(\d+)/);
+          if (mDurMs) {
+            data.videoLengthSec = Math.round(parseInt(mDurMs[1], 10) / 1000);
+          } else {
+            const mDurSec = content.match(/["'](?:length_in_second|video_duration)["']\s*:\s*(\d+)/);
+            if (mDurSec) data.videoLengthSec = parseInt(mDurSec[1], 10);
+          }
+        }
+
+        // 5. Creation / Publish time
+        if (!data.creationTime) {
+          const mTime = content.match(/["'](?:creation_time|publish_time|video_publish_date)["']\s*:\s*(\d{9,12})/);
+          if (mTime) {
+            data.creationTime = parseInt(mTime[1], 10);
+          }
+        }
+
+        if (data.reactions > 0 && data.comments > 0 && data.shares > 0 && data.videoLengthSec > 0 && data.creationTime) {
+          break;
+        }
+      }
+    } catch (e) {
+      console.warn('[FB-Collector] Relay script extraction notice:', e);
+    }
+
+    return data;
+  },
+
+  /**
    * Extracts reaction, comment, share, and view counts from active player
    */
   extractPlayerMetrics(reelId) {
-    let reactions = 0;
-    let comments = 0;
-    let shares = 0;
-    let views = this.gridViewsMap.get(reelId) || 0;
+    // 1. Primary: In-page Relay JSON scripts (exact unrounded numbers)
+    const relay = this.extractFromRelayScripts(reelId);
+    let reactions = relay.reactions || 0;
+    let comments = relay.comments || 0;
+    let shares = relay.shares || 0;
+    let views = this.gridViewsMap.get(reelId) || relay.views || 0;
 
-    const actionElements = document.querySelectorAll(
-      '[aria-label*="Like"], [aria-label*="reaction"], [aria-label*="Comment"], [aria-label*="Share"], [aria-label*="লাইক"], [aria-label*="মন্তব্য"], [aria-label*="শেয়ার"]'
+    // 2. Secondary / DOM: Inspect action buttons and count labels
+    const actionButtons = document.querySelectorAll(
+      'div[role="button"][aria-label], span[role="button"][aria-label], a[role="button"][aria-label], div[role="button"]'
     );
 
-    actionElements.forEach(el => {
-      const aria = el.getAttribute('aria-label') || '';
-      const text = (el.textContent || '').trim();
-      const parent = el.parentElement;
+    actionButtons.forEach(btn => {
+      const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
+      // Look for count inside button or its immediate container
+      const container = btn.closest('div[role="toolbar"]') || btn.parentElement;
+      const countSpan = btn.querySelector('span[dir="auto"]') ||
+                        btn.nextElementSibling ||
+                        container?.querySelector('span[dir="auto"]');
 
-      let num = Parser.parseMetric(aria);
-      if (num === 0 && text) num = Parser.parseMetric(text);
-      if (num === 0 && parent) {
-        const siblingText = (parent.textContent || '').trim();
-        num = Parser.parseMetric(siblingText);
+      const countText = countSpan ? (countSpan.textContent || '').trim() : '';
+      let num = Parser.parseMetric(countText);
+      if (num === 0) num = Parser.parseMetric(aria);
+      if (num === 0 && container) {
+        num = Parser.parseMetric(container.textContent || '');
       }
 
-      if (/(?:like|reaction|লাইক|প্রতিক্রিয়া)/i.test(aria) && num > 0) {
-        reactions = Math.max(reactions, num);
+      // Reactions: Like, Heart, Reactions, etc.
+      if (/(?:like|reaction|лайк|লাইক|প্রতিক্রিয়া|me gusta|react)/i.test(aria)) {
+        if (num > reactions) reactions = num;
       }
-      if (/(?:comment|মন্তব্য)/i.test(aria) && num > 0) {
-        comments = Math.max(comments, num);
+
+      // Comments
+      if (/(?:comment|মন্তব্য|comentar)/i.test(aria)) {
+        if (num > comments) comments = num;
       }
-      if (/(?:share|শেয়ার)/i.test(aria) && num > 0) {
-        shares = Math.max(shares, num);
+
+      // Shares
+      if (/(?:share|শেয়ার|শেয়ার|compartir|send this to friends)/i.test(aria)) {
+        if (num > shares) shares = num;
       }
     });
 
-    if (reactions === 0 || comments === 0) {
-      const spans = document.querySelectorAll('span[dir="auto"]');
-      spans.forEach(span => {
-        const txt = span.textContent.trim();
-        if (/^[০-৯0-9]+(?:\.[০-৯0-9]+)?[KMBkmbহাজারলাখকোটি]?$/.test(txt)) {
-          const val = Parser.parseMetric(txt);
-          const parent = span.parentElement;
-          if (parent && (parent.querySelector('svg') || parent.querySelector('i'))) {
-            if (reactions === 0) reactions = val;
-            else if (comments === 0) comments = val;
-            else if (shares === 0) shares = val;
+    // 3. Comments Drawer Header scan (if open or rendered in DOM)
+    if (comments === 0) {
+      const commentHeaders = document.querySelectorAll('h2, h3, span[dir="auto"], div[dir="auto"]');
+      for (const el of commentHeaders) {
+        const txt = (el.textContent || '').trim();
+        if (/(?:comments|মন্তব্য|টি মন্তব্য)\b/i.test(txt) && txt.length < 30) {
+          const parsed = Parser.parseMetric(txt);
+          if (parsed > 0) {
+            comments = parsed;
+            break;
           }
         }
-      });
+      }
     }
 
+    // 4. Positional fallback for Reel Action Bar:
+    // Vertical action bar beside reel video has standard order: 1st Like, 2nd Comment, 3rd Share
+    if (reactions === 0 || comments === 0) {
+      const actionColumns = document.querySelectorAll(
+        'div[data-pagelet*="Reel"] div, div[role="dialog"] div, div[role="main"] div'
+      );
+      for (const col of actionColumns) {
+        const buttons = col.querySelectorAll(':scope > div > div[role="button"], :scope > div[role="button"]');
+        if (buttons.length >= 2 && buttons.length <= 6) {
+          const counts = [];
+          buttons.forEach(b => {
+            const span = b.querySelector('span') || b.parentElement?.querySelector('span');
+            if (span) {
+              const val = Parser.parseMetric(span.textContent || '');
+              counts.push(val);
+            }
+          });
+          if (counts.length >= 2 && counts[0] > 0) {
+            if (reactions === 0) reactions = counts[0];
+            if (comments === 0 && counts.length > 1) comments = counts[1];
+            if (shares === 0 && counts.length > 2) shares = counts[2];
+            break;
+          }
+        }
+      }
+    }
+
+    // 5. Views fallback from DOM if still 0
     if (views === 0) {
       const viewNodes = document.querySelectorAll('span, div');
       for (const node of viewNodes) {
-        const t = node.textContent.trim();
-        if (/(?:views|view|ভিউ|বার দেখা হয়েছে)/i.test(t)) {
+        const t = (node.textContent || '').trim();
+        if (/(?:views|view|ভিউ|বার দেখা হয়েছে)/i.test(t) && t.length < 30) {
           const parsed = Parser.parseMetric(t);
           if (parsed > 0) {
             views = parsed;
@@ -419,13 +542,22 @@ const ReelsExtractor = {
   },
 
   /**
-   * Extracts media URL and video length
+   * Extracts media URL and formatted video length ('3 min 5 sec', '30 min 43 sec', etc.)
    */
-  extractPlayerMedia() {
+  extractPlayerMedia(reelId = null) {
     let mediaUrl = '';
     let thumbnail = '';
     let videoLength = 'N/A';
 
+    // 1. Check Relay JSON scripts first
+    if (reelId) {
+      const relay = this.extractFromRelayScripts(reelId);
+      if (relay && relay.videoLengthSec > 0) {
+        videoLength = Parser.formatVideoDuration(relay.videoLengthSec);
+      }
+    }
+
+    // 2. Check HTML5 <video> element
     const video = document.querySelector('video');
     if (video) {
       if (video.poster) {
@@ -435,8 +567,38 @@ const ReelsExtractor = {
       if (video.src && video.src.startsWith('http')) {
         mediaUrl = video.src;
       }
-      if (video.duration && !isNaN(video.duration) && video.duration > 0) {
-        videoLength = Parser.formatDuration(video.duration);
+      if (videoLength === 'N/A' && video.duration && !isNaN(video.duration) && video.duration > 0) {
+        videoLength = Parser.formatVideoDuration(video.duration);
+      }
+    }
+
+    // 3. Check player seekbar / progressbar
+    if (videoLength === 'N/A') {
+      const progress = document.querySelector('div[role="progressbar"], div[aria-valuemax]');
+      if (progress) {
+        const max = parseFloat(progress.getAttribute('aria-valuemax'));
+        if (!isNaN(max) && max > 0 && max < 7200 && max !== 100) {
+          videoLength = Parser.formatVideoDuration(max);
+        }
+      }
+    }
+
+    // 4. Check time text in player controls (e.g. "0:15 / 3:05")
+    if (videoLength === 'N/A') {
+      const timeSpans = document.querySelectorAll('span, div');
+      for (const span of timeSpans) {
+        const text = (span.textContent || '').trim();
+        const match = text.match(/\/\s*([0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?)/);
+        if (match) {
+          const parts = match[1].split(':').map(Number);
+          let sec = 0;
+          if (parts.length === 3) sec = parts[0] * 3600 + parts[1] * 60 + parts[2];
+          else if (parts.length === 2) sec = parts[0] * 60 + parts[1];
+          if (sec > 0) {
+            videoLength = Parser.formatVideoDuration(sec);
+            break;
+          }
+        }
       }
     }
 
@@ -452,31 +614,71 @@ const ReelsExtractor = {
   },
 
   /**
-   * Extracts published date from active player
+   * Extracts published date as relative time length:
+   * e.g., '5hr ago', '3 days ago', '2 month ago', '1 year ago'
    */
-  extractPlayerPostedDate() {
-    const metaDate = document.querySelector('meta[property="article:published_time"]');
-    if (metaDate && metaDate.content) {
-      try {
-        const d = new Date(metaDate.content);
-        return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      } catch (e) {}
+  extractPlayerPostedDate(reelId = null) {
+    // 1. Check Relay JSON scripts for exact creation_time / publish_time
+    if (reelId) {
+      const relay = this.extractFromRelayScripts(reelId);
+      if (relay && relay.creationTime) {
+        return Parser.formatTimeAgo(relay.creationTime);
+      }
     }
 
-    const anchors = document.querySelectorAll('a[role="link"], span[dir="auto"], abbr');
-    for (const a of anchors) {
+    // 2. Check meta article:published_time
+    const metaDate = document.querySelector('meta[property="article:published_time"]');
+    if (metaDate && metaDate.content) {
+      const relative = Parser.formatTimeAgo(metaDate.content);
+      if (relative && relative !== 'Recent') {
+        return relative;
+      }
+    }
+
+    // 3. Search header timestamp anchors and spans near author
+    const headerAnchors = document.querySelectorAll(
+      'a[role="link"][href*="/reel/"], a[role="link"][href*="/videos/"], a[role="link"][href*="/posts/"], abbr'
+    );
+
+    for (const a of headerAnchors) {
       if (a.closest('[role="article"]') || a.closest('form')) continue;
 
-      const aria = a.getAttribute('aria-label') || '';
-      const text = (a.textContent || '').trim();
-      const dateRegex = /(?:hour|hr|min|day|week|month|year|yesterday|just now|ago|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|ঘণ্টা|মিনিট|দিন|সপ্তাহ|মাস|বছর|গতকাল|এইমাত্র|\b\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}\b)/i;
-
-      if (aria && aria.length < 40 && !/(like|comment|share|follow|ফলো|লাইক|মন্তব্য)/i.test(aria) && dateRegex.test(aria)) {
-        return aria;
+      if (a.tagName.toLowerCase() === 'abbr') {
+        const title = a.getAttribute('title') || '';
+        const txt = a.textContent.trim();
+        if (txt) {
+          const formatted = Parser.formatTimeAgo(txt);
+          if (formatted !== 'Recent') return formatted;
+        }
+        if (title) {
+          const formatted = Parser.formatTimeAgo(title);
+          if (formatted !== 'Recent') return formatted;
+        }
       }
 
-      if (text && text.length < 35 && !/(like|comment|share|follow|ফলো|লাইক|মন্তব্য)/i.test(text) && dateRegex.test(text)) {
-        return text;
+      const aria = (a.getAttribute('aria-label') || '').trim();
+      if (aria && aria.length < 40 && !/(like|comment|share|follow|ফলো|লাইক|মন্তব্য)/i.test(aria)) {
+        const formatted = Parser.formatTimeAgo(aria);
+        if (formatted !== 'Recent') return formatted;
+      }
+
+      const text = (a.textContent || '').trim();
+      if (text && text.length < 30 && !/(like|comment|share|follow|ফলো|লাইক|মন্তব্য)/i.test(text)) {
+        const formatted = Parser.formatTimeAgo(text);
+        if (formatted !== 'Recent') return formatted;
+      }
+    }
+
+    // 4. Broader header search: spans adjacent to author header or dot separator (·)
+    const allSpans = document.querySelectorAll('span[dir="auto"]');
+    for (const s of allSpans) {
+      if (s.closest('[role="article"]') || s.closest('form') || s.closest('button') || s.closest('[role="button"]')) {
+        continue;
+      }
+      const t = (s.textContent || '').trim();
+      if (t.length < 25 && /^(?:[০-৯0-9]+\s*(?:h|hr|hrs|hours?|d|days?|w|wks|weeks?|m|mo|mos|months?|y|yrs|years?|ঘণ্টা|দিন|মাস|বছর)|yesterday|just now|এইমাত্র|গতকাল)/i.test(t)) {
+        const formatted = Parser.formatTimeAgo(t);
+        if (formatted !== 'Recent') return formatted;
       }
     }
 

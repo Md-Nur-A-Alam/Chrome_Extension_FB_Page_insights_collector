@@ -253,16 +253,23 @@ const PostsExtractor = {
     if (anchor) {
       const aria = anchor.getAttribute('aria-label');
       if (aria && !/(like|comment|share|লাইক|মন্তব্য)/i.test(aria)) {
+        const formatted = Parser.formatTimeAgo(aria.trim());
+        if (formatted !== 'Recent') return formatted;
         return aria.trim();
       }
 
       const abbr = anchor.querySelector('abbr');
       if (abbr) {
-        return abbr.getAttribute('title') || abbr.textContent.trim();
+        const title = abbr.getAttribute('title') || abbr.textContent.trim();
+        const formatted = Parser.formatTimeAgo(title);
+        if (formatted !== 'Recent') return formatted;
+        return title;
       }
 
       const text = anchor.textContent.trim();
       if (text && text.length > 0 && text.length < 40) {
+        const formatted = Parser.formatTimeAgo(text);
+        if (formatted !== 'Recent') return formatted;
         return text;
       }
     }
@@ -276,6 +283,8 @@ const PostsExtractor = {
         text.length < 40 &&
         /(hr|hour|min|day|yesterday|just now|ago|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|ঘণ্টা|মিনিট|দিন|গতকাল)/i.test(text)
       ) {
+        const formatted = Parser.formatTimeAgo(text);
+        if (formatted !== 'Recent') return formatted;
         return text;
       }
     }

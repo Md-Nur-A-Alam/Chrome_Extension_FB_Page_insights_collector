@@ -280,7 +280,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       tr.innerHTML = `
         <td style="color: var(--text-muted); font-size: 11px;">${index + 1}</td>
-        <td><span class="badge-tag ${badgeClass}">${badgeLabel}</span></td>
+        <td>
+          <span class="badge-tag ${badgeClass}">${badgeLabel}</span>
+          ${item.videoLength && item.videoLength !== 'N/A' ? `<div style="margin-top:4px;"><span class="length-badge" style="font-size:10px;padding:2px 5px;">⏱ ${escapeHtml(item.videoLength)}</span></div>` : ''}
+        </td>
         <td>
           <div class="link-cell">
             <a href="${item.url}" target="_blank" rel="noopener noreferrer" class="clean-link" title="${item.url}">
@@ -364,13 +367,14 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const lengthBadge = item.videoLength && item.videoLength !== 'N/A'
-        ? `<span class="length-badge">⏱ ${escapeHtml(item.videoLength)}</span>`
+        ? `<span class="length-badge" style="font-size:10px;padding:2px 6px;margin-left:4px;">⏱ ${escapeHtml(item.videoLength)}</span>`
         : '';
 
       card.innerHTML = `
         <div class="card-top">
           <div class="card-top-left">
             <span class="badge-tag ${badgeClass}">${badgeLabel}</span>
+            ${lengthBadge}
             ${item.authorAvatar ? `<img src="${escapeHtml(item.authorAvatar)}" style="width:18px;height:18px;border-radius:50%;object-fit:cover;">` : ''}
             <span style="font-size:12px;font-weight:600;color:#fff;margin-left:4px;">${escapeHtml(item.authorName || 'Facebook Page')}</span>
           </div>
