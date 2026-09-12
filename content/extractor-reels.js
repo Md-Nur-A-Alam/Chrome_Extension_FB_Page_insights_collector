@@ -44,10 +44,8 @@ const ReelsExtractor = {
         }
       }
 
-      // Thumbnail image
-      let thumbnail = '';
-      const img = target.querySelector('img[src*="scontent"], img[src*="fbcdn"]');
-      if (img && img.src) thumbnail = img.src;
+      // Thumbnail image (multi-strategy: img, video poster, background-image, SVG image)
+      const thumbnail = this.extractGridThumbnail(target);
 
       // Caption snippet if on card
       let caption = '';
@@ -93,6 +91,52 @@ const ReelsExtractor = {
     });
 
     return results;
+  },
+
+  /**
+   * Multi-strategy thumbnail extractor for Phase 1 grid cards
+   * Checks: 1) <img> tags, 2) <video poster>, 3) CSS background-image, 4) SVG <image>
+   */
+  extractGridThumbnail(target) {
+    if (!target) return '';
+
+    // 1. Check <img> elements (filter out small icons/emojis)
+    const imgs = target.querySelectorAll('img');
+    for (const img of imgs) {
+      const src = img.currentSrc || img.src || img.getAttribute('src') || '';
+      if (src && !src.startsWith('data:') && (src.includes('scontent') || src.includes('fbcdn') || src.includes('fb') || src.startsWith('http'))) {
+        const w = img.naturalWidth || img.width || 0;
+        const h = img.naturalHeight || img.height || 0;
+        if ((w > 40 && h > 40) || (!w && !h && src.length > 30)) {
+          return src;
+        }
+      }
+    }
+
+    // 2. Check <video poster="...">
+    const video = target.querySelector('video[poster]');
+    if (video && video.poster && video.poster.startsWith('http')) {
+      return video.poster;
+    }
+
+    // 3. Check CSS background-image style on divs/spans
+    const bgEls = target.querySelectorAll('[style*="background"]');
+    for (const el of bgEls) {
+      const style = el.getAttribute('style') || '';
+      const match = style.match(/url\(['"]?(https?:\/\/[^'"\)]+)['"]?\)/i);
+      if (match && match[1]) {
+        return match[1];
+      }
+    }
+
+    // 4. Check SVG <image> tags
+    const svgImg = target.querySelector('svg image, image');
+    if (svgImg) {
+      const href = svgImg.getAttribute('xlink:href') || svgImg.getAttribute('href') || '';
+      if (href && href.startsWith('http')) return href;
+    }
+
+    return '';
   },
 
   /**

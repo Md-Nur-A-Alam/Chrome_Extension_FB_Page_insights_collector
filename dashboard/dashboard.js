@@ -49,6 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const recordType = document.getElementById('recordType');
   const recordAuthor = document.getElementById('recordAuthor');
   const recordUrl = document.getElementById('recordUrl');
+  const recordThumbnail = document.getElementById('recordThumbnail');
   const recordDate = document.getElementById('recordDate');
   const recordLength = document.getElementById('recordLength');
   const recordCaption = document.getElementById('recordCaption');
@@ -338,6 +339,17 @@ document.addEventListener('DOMContentLoaded', () => {
     statTotalShares.textContent = Parser.formatCompactNumber(totalShares);
   }
 
+  function getItemThumbnail(item) {
+    if (!item) return '';
+    const candidates = [item.thumbnail, item.thumbnailUrl, item.mediaUrl, item.images];
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim().startsWith('http')) {
+        return c.trim();
+      }
+    }
+    return '';
+  }
+
   function getFilteredAndSortedItems() {
     let list = [...rawItems];
 
@@ -431,12 +443,18 @@ document.addEventListener('DOMContentLoaded', () => {
         ? `<img src="${escapeHtml(item.authorAvatar)}" style="width:20px;height:20px;border-radius:50%;vertical-align:middle;margin-right:6px;object-fit:cover;">` 
         : '';
       const authorDisplay = `${authorAvatar}<span>${escapeHtml(item.authorName || 'Facebook Page')}</span>`;
+      const thumb = getItemThumbnail(item);
 
       tr.innerHTML = `
         <td data-col="index" style="color: var(--text-muted); font-size: 11px;">${index + 1}</td>
         <td data-col="type">
-          <span class="badge-tag ${badgeClass}">${badgeLabel}</span>
-          ${item.videoLength && item.videoLength !== 'N/A' ? `<div style="margin-top:4px;"><span class="length-badge" style="font-size:10px;padding:2px 5px;">⏱ ${escapeHtml(item.videoLength)}</span></div>` : ''}
+          <div class="type-cell-content">
+            ${thumb ? `<img src="${escapeHtml(thumb)}" alt="Thumbnail" class="table-thumb-preview" title="View details" onerror="this.style.display='none'">` : ''}
+            <div>
+              <span class="badge-tag ${badgeClass}">${badgeLabel}</span>
+              ${item.videoLength && item.videoLength !== 'N/A' ? `<div style="margin-top:3px;"><span class="length-badge" style="font-size:10px;padding:2px 5px;">⏱ ${escapeHtml(item.videoLength)}</span></div>` : ''}
+            </div>
+          </div>
         </td>
         <td data-col="link">
           <div class="link-cell">
@@ -541,6 +559,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const lengthBadge = item.videoLength && item.videoLength !== 'N/A'
         ? `<span class="length-badge" style="font-size:10px;padding:2px 6px;margin-left:4px;">⏱ ${escapeHtml(item.videoLength)}</span>`
         : '';
+      const thumb = getItemThumbnail(item);
 
       card.innerHTML = `
         <div class="card-top">
@@ -552,6 +571,12 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
           <span class="card-date">${escapeHtml(item.publishedDate || item.postedAt || 'Recent')}</span>
         </div>
+
+        ${thumb ? `
+          <div class="card-thumb-banner">
+            <img src="${escapeHtml(thumb)}" alt="Thumbnail" class="card-thumb-img" loading="lazy" onerror="this.parentElement.style.display='none'">
+          </div>
+        ` : ''}
 
         <div class="card-body">
           ${escapeHtml(item.caption || item.content || 'No caption text')}
@@ -670,6 +695,7 @@ document.addEventListener('DOMContentLoaded', () => {
       recordModalTitle.textContent = 'Add New Record';
       recordModalIcon.textContent = '➕';
       recordType.value = 'reel';
+      if (recordThumbnail) recordThumbnail.value = '';
       recordDate.value = 'Recent';
       recordLength.value = '';
       recordViews.value = '0';
@@ -688,6 +714,7 @@ document.addEventListener('DOMContentLoaded', () => {
     recordType.value = item.type || 'reel';
     recordAuthor.value = item.authorName || '';
     recordUrl.value = item.url || item.postUrl || '';
+    if (recordThumbnail) recordThumbnail.value = getItemThumbnail(item);
     recordDate.value = item.publishedDate || item.postedAt || 'Recent';
     recordLength.value = item.videoLength && item.videoLength !== 'N/A' ? item.videoLength : '';
     recordCaption.value = item.caption || item.content || '';
@@ -743,6 +770,10 @@ document.addEventListener('DOMContentLoaded', () => {
         item.type = type;
         item.url = url;
         item.postUrl = url;
+        const thumbVal = recordThumbnail ? recordThumbnail.value.trim() : '';
+        item.thumbnail = thumbVal;
+        item.thumbnailUrl = thumbVal;
+        item.mediaUrl = thumbVal;
         item.authorName = author;
         item.publishedDate = date;
         item.postedAt = date;
@@ -768,6 +799,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       // CREATE new item
       const newId = `custom_${Date.now()}`;
+      const thumbVal = recordThumbnail ? recordThumbnail.value.trim() : '';
       const newRecord = {
         id: newId,
         postId: newId,
@@ -776,6 +808,10 @@ document.addEventListener('DOMContentLoaded', () => {
         mediaType: 'image',
         url: url,
         postUrl: url,
+        thumbnail: thumbVal,
+        thumbnailUrl: thumbVal,
+        mediaUrl: thumbVal,
+        images: thumbVal,
         authorName: author,
         authorHandle: '',
         publishedDate: date,
@@ -845,6 +881,8 @@ document.addEventListener('DOMContentLoaded', () => {
       badgeLabel = 'Video';
     }
 
+    const thumb = getItemThumbnail(item);
+
     detailsModalBody.innerHTML = `
       <div class="details-grid">
         <div class="details-meta-row">
@@ -854,6 +892,12 @@ document.addEventListener('DOMContentLoaded', () => {
           <span style="font-size: 13px; font-weight: 600; color: #fff;">${escapeHtml(item.authorName || 'Facebook Page')}</span>
           <span style="font-size: 12px; color: var(--text-muted); margin-left: auto;">${escapeHtml(item.publishedDate || item.postedAt || 'Recent')}</span>
         </div>
+
+        ${thumb ? `
+          <div class="details-thumb-wrap">
+            <img src="${escapeHtml(thumb)}" alt="Thumbnail Preview" class="details-thumb-img" onerror="this.parentElement.style.display='none'">
+          </div>
+        ` : ''}
 
         <div style="font-size: 12px; display: flex; align-items: center; justify-content: space-between; background: rgba(15,23,42,0.6); padding: 8px 12px; border-radius: var(--radius-xs); border: 1px solid var(--border-glass);">
           <a href="${escapeHtml(item.url || item.postUrl)}" target="_blank" rel="noopener noreferrer" class="clean-link" style="max-width: 80%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
