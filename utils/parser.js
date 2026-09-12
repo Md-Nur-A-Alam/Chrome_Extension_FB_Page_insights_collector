@@ -371,6 +371,12 @@ const Parser = {
   }
 };
 
+if (typeof globalThis !== 'undefined') {
+  globalThis.Parser = Parser;
+}
+if (typeof window !== 'undefined') {
+  window.Parser = Parser;
+}
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = Parser;
 }

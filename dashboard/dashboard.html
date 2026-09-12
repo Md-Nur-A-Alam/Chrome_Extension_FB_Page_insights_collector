@@ -31,6 +31,10 @@
       </div>
 
       <div class="nav-actions">
+        <button id="addRecordBtn" class="glass-btn btn-cta" title="Add a new record manually">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          Add Record
+        </button>
         <button id="refreshBtn" class="glass-btn" title="Refresh data from storage">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
           Refresh
@@ -146,6 +150,42 @@
             </select>
           </div>
 
+          <!-- Column Visibility Toggle -->
+          <div class="col-visibility-wrapper">
+            <button id="columnToggleBtn" class="glass-btn" title="Toggle visible columns" type="button">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                <line x1="9" y1="3" x2="9" y2="21"></line>
+                <line x1="15" y1="3" x2="15" y2="21"></line>
+              </svg>
+              Columns
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+            <div id="columnToggleMenu" class="col-dropdown-menu hidden">
+              <div class="col-dropdown-header">
+                <span>Display Columns</span>
+                <div class="col-dropdown-quick">
+                  <button type="button" id="colSelectAllBtn" class="link-action-btn">All</button>
+                  <span class="sep">·</span>
+                  <button type="button" id="colResetBtn" class="link-action-btn">Reset</button>
+                </div>
+              </div>
+              <div class="col-checkbox-list">
+                <label class="col-check-item"><input type="checkbox" data-col="index" checked> <span># (Index)</span></label>
+                <label class="col-check-item"><input type="checkbox" data-col="type" checked> <span>Type</span></label>
+                <label class="col-check-item"><input type="checkbox" data-col="link" checked> <span>Share Link</span></label>
+                <label class="col-check-item"><input type="checkbox" data-col="author" checked> <span>Author</span></label>
+                <label class="col-check-item"><input type="checkbox" data-col="date" checked> <span>Posted Date</span></label>
+                <label class="col-check-item"><input type="checkbox" data-col="caption" checked> <span>Content / Caption</span></label>
+                <label class="col-check-item"><input type="checkbox" data-col="views" checked> <span>Views</span></label>
+                <label class="col-check-item"><input type="checkbox" data-col="reactions" checked> <span>Reactions</span></label>
+                <label class="col-check-item"><input type="checkbox" data-col="comments" checked> <span>Comments</span></label>
+                <label class="col-check-item"><input type="checkbox" data-col="shares" checked> <span>Shares</span></label>
+                <label class="col-check-item"><input type="checkbox" data-col="actions" checked> <span>Actions</span></label>
+              </div>
+            </div>
+          </div>
+
           <!-- View Mode Toggle -->
           <div class="view-toggle">
             <button id="viewTableBtn" class="toggle-btn active" title="Table View">
@@ -175,17 +215,17 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th style="width: 40px;">#</th>
-                <th style="width: 70px;">Type</th>
-                <th>Share / Permlink Link</th>
-                <th style="width: 130px;">Author</th>
-                <th style="width: 110px;">Posted Date</th>
-                <th>Content / Caption</th>
-                <th style="width: 75px; text-align: right;">Views</th>
-                <th style="width: 75px; text-align: right;">Reactions</th>
-                <th style="width: 75px; text-align: right;">Comments</th>
-                <th style="width: 75px; text-align: right;">Shares</th>
-                <th style="width: 60px; text-align: center;">Action</th>
+                <th data-col="index" style="width: 40px;">#</th>
+                <th data-col="type" style="width: 75px;">Type</th>
+                <th data-col="link">Share / Permlink Link</th>
+                <th data-col="author" style="width: 130px;">Author</th>
+                <th data-col="date" style="width: 110px;">Posted Date</th>
+                <th data-col="caption">Content / Caption</th>
+                <th data-col="views" style="width: 75px; text-align: right;">Views</th>
+                <th data-col="reactions" style="width: 75px; text-align: right;">Reactions</th>
+                <th data-col="comments" style="width: 75px; text-align: right;">Comments</th>
+                <th data-col="shares" style="width: 75px; text-align: right;">Shares</th>
+                <th data-col="actions" style="width: 105px; text-align: center;">Actions</th>
               </tr>
             </thead>
             <tbody id="tableBody">
@@ -200,6 +240,131 @@
         </div>
       </section>
     </main>
+  </div>
+
+  <!-- Modal 1: Add / Edit Record (CRUD Create & Update) -->
+  <div id="recordModal" class="modal-backdrop">
+    <div class="modal-container glass-panel">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-icon" id="recordModalIcon">✏️</div>
+          <h3 id="recordModalTitle">Edit Record</h3>
+        </div>
+        <button type="button" class="modal-close-btn" id="closeRecordModalBtn" title="Close modal">&times;</button>
+      </div>
+
+      <form id="recordForm" class="modal-body">
+        <input type="hidden" id="recordEditId">
+
+        <div class="form-row form-row-2">
+          <div class="form-group">
+            <label for="recordType">Content Type <span class="required">*</span></label>
+            <select id="recordType" class="glass-select form-input" required>
+              <option value="reel">Reel</option>
+              <option value="post">Post</option>
+              <option value="video">Video</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="recordAuthor">Author / Page Name</label>
+            <input type="text" id="recordAuthor" class="form-input" placeholder="e.g. Pedago Academy">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="recordUrl">Post / Reel URL <span class="required">*</span></label>
+          <input type="url" id="recordUrl" class="form-input" placeholder="https://www.facebook.com/reel/..." required>
+        </div>
+
+        <div class="form-row form-row-2">
+          <div class="form-group">
+            <label for="recordDate">Posted Date</label>
+            <input type="text" id="recordDate" class="form-input" placeholder="e.g. 5hr ago, 2 days ago, Recent">
+          </div>
+          <div class="form-group">
+            <label for="recordLength">Video Duration (optional)</label>
+            <input type="text" id="recordLength" class="form-input" placeholder="e.g. 1:30, 0:45 or N/A">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="recordCaption">Caption / Content</label>
+          <textarea id="recordCaption" class="form-input form-textarea" rows="3" placeholder="Enter post caption or description..."></textarea>
+        </div>
+
+        <!-- Metrics Grid -->
+        <div class="metrics-grid-title">Engagement Metrics</div>
+        <div class="form-row form-row-4">
+          <div class="form-group">
+            <label for="recordViews">Views</label>
+            <input type="number" id="recordViews" class="form-input" min="0" value="0">
+          </div>
+          <div class="form-group">
+            <label for="recordReactions">Reactions</label>
+            <input type="number" id="recordReactions" class="form-input" min="0" value="0">
+          </div>
+          <div class="form-group">
+            <label for="recordComments">Comments</label>
+            <input type="number" id="recordComments" class="form-input" min="0" value="0">
+          </div>
+          <div class="form-group">
+            <label for="recordShares">Shares</label>
+            <input type="number" id="recordShares" class="form-input" min="0" value="0">
+          </div>
+        </div>
+
+        <div id="reelsRuleHint" class="form-hint">
+          ℹ️ <strong>Reels Rule Enforced:</strong> If Views &lt; Reactions &rarr; Reactions = 0. If Reactions &lt; Comments &rarr; Comments = 0. If Comments &lt; Shares &rarr; Shares = 0.
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="glass-btn" id="cancelRecordBtn">Cancel</button>
+          <button type="submit" class="glass-btn btn-cta" id="saveRecordBtn">Save Record</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 2: Delete Confirmation Modal (CRUD Delete) -->
+  <div id="deleteModal" class="modal-backdrop">
+    <div class="modal-container modal-small glass-panel">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-icon text-danger">🗑️</div>
+          <h3>Delete Record</h3>
+        </div>
+        <button type="button" class="modal-close-btn" id="closeDeleteModalBtn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="delete-warning-text">Are you sure you want to delete this record from the collected data?</p>
+        <div id="deleteItemPreview" class="delete-item-preview">
+          <!-- Item preview dynamically populated -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="glass-btn" id="cancelDeleteBtn">Cancel</button>
+        <button type="button" class="glass-btn btn-danger-cta" id="confirmDeleteBtn">Yes, Delete Record</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 3: View Full Details Modal (CRUD Read) -->
+  <div id="detailsModal" class="modal-backdrop">
+    <div class="modal-container glass-panel">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-icon">📄</div>
+          <h3 id="detailsModalTitle">Content Details</h3>
+        </div>
+        <button type="button" class="modal-close-btn" id="closeDetailsModalBtn">&times;</button>
+      </div>
+      <div class="modal-body" id="detailsModalBody">
+        <!-- Dynamically populated -->
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="glass-btn" id="closeDetailsBtn">Close</button>
+      </div>
+    </div>
   </div>
 
   <script src="../utils/parser.js"></script>

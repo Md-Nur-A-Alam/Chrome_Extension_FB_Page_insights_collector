@@ -12,6 +12,17 @@ export class CommentParser {
     let maxCount: number | null = null;
 
     candidates.forEach((el) => {
+      // Must not be in comments or chat docks
+      if (
+        el.closest('[role="article"]') ||
+        el.closest('form') ||
+        el.closest('[role="complementary"]') ||
+        el.closest('[role="region"]') ||
+        el.closest('[aria-label*="Chat" i]')
+      ) {
+        return;
+      }
+
       const aria = el.getAttribute('aria-label') || '';
       let num = parseSocialNumber(aria);
 

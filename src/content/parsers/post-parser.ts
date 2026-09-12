@@ -27,7 +27,10 @@ export class PostParser {
 
     const reactions = ReactionParser.parse(container);
     const comments = CommentParser.parse(container);
-    const shares = ShareParser.parse(container);
+    let shares = ShareParser.parse(container);
+    if (shares !== null && comments !== null && shares > comments) {
+      shares = 0;
+    }
 
     let durationSeconds: number | null = null;
     let durationFormatted: string | null = null;

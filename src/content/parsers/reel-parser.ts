@@ -10,6 +10,7 @@ import { ReelDetector } from '../detectors/reel-detector';
 import { cleanFacebookUrl, extractFacebookId } from '../../shared/utils/url-normalizer';
 import { formatVideoDuration } from '../../shared/utils/duration-normalizer';
 import { formatTimeAgo, parseDateToIso, calculateAgeHours } from '../../shared/utils/date-normalizer';
+import { parseSocialNumber } from '../../shared/utils/number-normalizer';
 
 export interface RelayReelData {
   reactions: number | null;
@@ -64,9 +65,21 @@ export class ReelParser {
 
         // Shares
         if (data.shares === null) {
-          const mShare = content.match(/["'](?:share_count|share_count_num)["']\s*:\s*(?:\{\s*["']count["']\s*:\s*(\d+)|(\d+))/);
+          const mShare = content.match(/["'](?:share_count|share_count_num|shares_count|post_share_count|total_share_count)["']\s*:\s*(?:\{\s*["'](?:count|total_count)["']\s*:\s*(\d+)|(\d+))/);
           if (mShare) {
             data.shares = parseInt(mShare[1] || mShare[2] || '0', 10);
+          }
+          if (data.shares === null) {
+            const mShareAlt = content.match(/["']shares["']\s*:\s*\{\s*["']count["']\s*:\s*(\d+)/);
+            if (mShareAlt && mShareAlt[1]) {
+              data.shares = parseInt(mShareAlt[1], 10);
+            }
+          }
+          if (data.shares === null) {
+            const mShareI18n = content.match(/["']i18n_share_count["']\s*:\s*["']([^"']+)["']/);
+            if (mShareI18n && mShareI18n[1]) {
+              data.shares = parseSocialNumber(mShareI18n[1]);
+            }
           }
         }
 
@@ -103,6 +116,43 @@ export class ReelParser {
   }
 
   /**
+   * Locates the Active Reel Container (modal dialog or video viewport)
+   */
+  static getActivePlayerContainer(): Element {
+    const dialog = document.querySelector('div[role="dialog"]');
+    if (dialog && dialog.querySelector('video')) {
+      return dialog;
+    }
+
+    const videos = Array.from(document.querySelectorAll('video'));
+    const activeVideo = videos.find((v) => !v.paused && v.currentTime > 0) || videos[0];
+
+    if (activeVideo) {
+      const d = activeVideo.closest('div[role="dialog"]');
+      if (d) return d;
+
+      const pagelet = activeVideo.closest('div[data-pagelet*="Reel"], div[data-pagelet*="Watch"]');
+      if (pagelet) return pagelet;
+
+      let curr: Element | null = activeVideo.parentElement;
+      for (let i = 0; i < 8 && curr && curr !== document.body; i++) {
+        if (curr.querySelector('div[role="toolbar"], div[role="button"][aria-label*="like" i], div[role="button"][aria-label*="share" i]')) {
+          return curr;
+        }
+        curr = curr.parentElement;
+      }
+
+      const main = activeVideo.closest('div[role="main"]');
+      if (main) return main;
+    }
+
+    return document.querySelector('div[role="dialog"]') ||
+           document.querySelector('div[data-pagelet*="Reel"]') ||
+           document.querySelector('div[role="main"]') ||
+           document.body;
+  }
+
+  /**
    * Parses the active standalone Reel Player modal
    */
   static parseActivePlayer(targetId?: string | null, targetUrl?: string | null, pageName = 'Facebook Page', gridViews: number | null = null): ReelContent {
@@ -113,20 +163,37 @@ export class ReelParser {
     // Extract Relay Data
     const relay = this.extractFromRelayScripts(id);
 
-    // DOM extraction (what the user legitimately sees on the active reel)
-    const domReactions = ReactionParser.parse(document.body);
-    const domComments = CommentParser.parse(document.body);
-    const domShares = ShareParser.parse(document.body);
+    // Active Container
+    const container = this.getActivePlayerContainer();
 
-    const reactions = domReactions !== null ? domReactions : relay.reactions;
-    const comments = domComments !== null ? domComments : relay.comments;
-    const shares = domShares !== null ? domShares : relay.shares;
-    const views = gridViews !== null ? gridViews : (relay.views !== null ? relay.views : ViewParser.parse(document.body));
+    // DOM extraction (strictly scoped to active reel container)
+    const domReactions = ReactionParser.parse(container);
+    const domComments = CommentParser.parse(container);
+    const domShares = ShareParser.parse(container);
+
+    let reactions = domReactions !== null ? domReactions : relay.reactions;
+    let comments = domComments !== null ? domComments : relay.comments;
+    let shares = domShares !== null ? domShares : relay.shares;
+    const views = gridViews !== null ? gridViews : (relay.views !== null ? relay.views : ViewParser.parse(container));
+
+    // Enforce Reels metric consistency hierarchy:
+    // 1. If view < reaction then reaction will be 0
+    if (views !== null && reactions !== null && views < reactions) {
+      reactions = 0;
+    }
+    // 2. If reaction < comment then comment will be 0
+    if (reactions !== null && comments !== null && reactions < comments) {
+      comments = 0;
+    }
+    // 3. If comment < share then share will be 0
+    if (comments !== null && shares !== null && comments < shares) {
+      shares = 0;
+    }
 
     // Duration
     let durationSeconds = relay.videoDurationSeconds;
     if (durationSeconds === null) {
-      const dur = DurationParser.parse(document.body);
+      const dur = DurationParser.parse(container);
       durationSeconds = dur.durationSeconds;
     }
     const durationFormatted = durationSeconds !== null ? formatVideoDuration(durationSeconds) : null;
@@ -141,17 +208,17 @@ export class ReelParser {
       publishedRelative = formatTimeAgo(relay.creationTime);
       ageHours = calculateAgeHours(publishedAt);
     } else {
-      const dateRes = DateParser.parse(document.body);
+      const dateRes = DateParser.parse(container);
       publishedAt = dateRes.publishedAt;
       publishedRelative = dateRes.publishedRelative;
       ageHours = dateRes.ageHours;
     }
 
-    // Caption
-    const caption = CaptionParser.extractCaption(document.body);
+    // Caption (scoped to container and checking author overlay)
+    const caption = CaptionParser.extractCaption(container, null, pageName);
 
     // Video / Poster
-    const video = document.querySelector('video');
+    const video = container.querySelector('video') || document.querySelector('video');
     const mediaUrl = video?.src && video.src.startsWith('http') ? video.src : null;
     const thumbnailUrl = video?.poster || null;
 

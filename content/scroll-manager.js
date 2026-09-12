@@ -334,7 +334,9 @@ class ScrollManager {
     currentReel.content = details.content || currentReel.content;
     currentReel.reactions = details.reactions;
     currentReel.comments = details.comments;
-    currentReel.shares = details.shares;
+    const sCount = parseInt(details.shares, 10) || 0;
+    const cCount = parseInt(details.comments, 10) || 0;
+    currentReel.shares = (sCount > cCount) ? 0 : sCount;
     if (details.views > 0) currentReel.views = details.views;
     currentReel.mediaUrl = details.mediaUrl || currentReel.mediaUrl;
     currentReel.thumbnail = details.thumbnail || currentReel.thumbnail;
@@ -407,6 +409,37 @@ class ScrollManager {
    */
   async finishQueue(queue, originUrl) {
     this.status = 'completed';
+
+    // After recording all data: enforce reels metric hierarchy
+    // view < reaction => reaction = 0, reaction < comment => comment = 0, comment < share => share = 0
+    queue.forEach(item => {
+      if (item.type === 'reel') {
+        let v = parseInt(item.views, 10) || 0;
+        let r = parseInt(item.reactions, 10) || 0;
+        let c = parseInt(item.comments, 10) || 0;
+        let s = parseInt(item.shares, 10) || 0;
+
+        if (v < r) {
+          r = 0;
+          item.reactions = 0;
+        }
+        if (r < c) {
+          c = 0;
+          item.comments = 0;
+        }
+        if (c < s) {
+          s = 0;
+          item.shares = 0;
+        }
+      } else {
+        const c = parseInt(item.comments, 10) || 0;
+        const s = parseInt(item.shares, 10) || 0;
+        if (s > c) {
+          item.shares = 0;
+        }
+      }
+    });
+
     console.log(`[FB-Collector] All ${queue.length} reels enriched!`);
     this.broadcastState(`✓ Complete! All ${queue.length} Reels enriched with full metrics!`);
 
@@ -520,6 +553,34 @@ class ScrollManager {
    */
   broadcastState(message = '') {
     const items = this.getItems();
+    // Enforce metric consistency rules
+    items.forEach(item => {
+      if (item.type === 'reel') {
+        let v = parseInt(item.views, 10) || 0;
+        let r = parseInt(item.reactions, 10) || 0;
+        let c = parseInt(item.comments, 10) || 0;
+        let s = parseInt(item.shares, 10) || 0;
+
+        if (v < r) {
+          r = 0;
+          item.reactions = 0;
+        }
+        if (r < c) {
+          c = 0;
+          item.comments = 0;
+        }
+        if (c < s) {
+          s = 0;
+          item.shares = 0;
+        }
+      } else {
+        const c = parseInt(item.comments, 10) || 0;
+        const s = parseInt(item.shares, 10) || 0;
+        if (s > c) {
+          item.shares = 0;
+        }
+      }
+    });
     const enrichedCount = this.getEnrichedCount();
     const displayCount = this.resolveMode() === 'reels' ? (enrichedCount || items.length) : items.length;
 

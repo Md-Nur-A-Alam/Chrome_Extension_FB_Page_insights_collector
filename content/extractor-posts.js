@@ -399,6 +399,9 @@ const PostsExtractor = {
         const num = Parser.parseMetric(r.getAttribute('aria-label') || r.textContent);
         if (num > reactions) reactions = num;
       });
+    // Business rule: if share > comment, then share will be 0
+    if (shares > comments) {
+      shares = 0;
     }
 
     return { reactions, comments, shares, views };

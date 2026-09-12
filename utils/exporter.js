@@ -77,7 +77,10 @@ const Exporter = {
       const mediaUrl = item.mediaUrl || item.thumbnail || '';
       const reactions = parseInt(item.reactions, 10) || 0;
       const comments = parseInt(item.comments, 10) || 0;
-      const shares = parseInt(item.shares, 10) || 0;
+      let shares = parseInt(item.shares, 10) || 0;
+      if (shares > comments) {
+        shares = 0;
+      }
       const views = parseInt(item.views, 10) || 0;
       const images = item.images || item.mediaUrl || item.thumbnail || '';
       const postedAt = item.publishedDate || item.postedAt || 'Recent';
@@ -164,14 +167,19 @@ const Exporter = {
     const lines = [headers.join('\t')];
 
     items.forEach(item => {
+      const c = parseInt(item.comments, 10) || 0;
+      let s = parseInt(item.shares, 10) || 0;
+      if (s > c) {
+        s = 0;
+      }
       const line = [
         this.cleanId(item.id),
         item.url || '',
         item.authorName || '',
         (item.caption || item.content || '').replace(/[\r\n\t]+/g, ' '),
         item.reactions || 0,
-        item.comments || 0,
-        item.shares || 0,
+        c,
+        s,
         item.views || 0,
         item.publishedDate || item.postedAt || ''
       ];

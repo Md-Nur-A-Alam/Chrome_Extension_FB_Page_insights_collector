@@ -225,6 +225,25 @@ const ReelsExtractor = {
     // 4. Extract Engagement Metrics (Reactions, Comments, Shares, Views)
     const metrics = this.extractPlayerMetrics(id, activeContainer);
 
+    let views = metrics.views || 0;
+    let reactions = metrics.reactions || 0;
+    let comments = metrics.comments || 0;
+    let shares = metrics.shares || 0;
+
+    // Consistency rule for reels:
+    // 1. If view < reaction then reaction will be 0
+    if (views < reactions) {
+      reactions = 0;
+    }
+    // 2. If reaction < comment then comment will be 0
+    if (reactions < comments) {
+      comments = 0;
+    }
+    // 3. If comment < share then share will be 0
+    if (comments < shares) {
+      shares = 0;
+    }
+
     // 5. Media URL & Video Info
     const mediaInfo = this.extractPlayerMedia(id, activeContainer);
 
@@ -246,10 +265,10 @@ const ReelsExtractor = {
       authorVerified: authorInfo.verified,
       caption: content || '',
       content: content || '',
-      reactions: metrics.reactions,
-      comments: metrics.comments,
-      shares: metrics.shares,
-      views: metrics.views,
+      reactions: reactions,
+      comments: comments,
+      shares: shares,
+      views: views,
       mediaUrl: mediaInfo.mediaUrl || mediaInfo.thumbnail || '',
       thumbnail: mediaInfo.thumbnail || '',
       images: mediaInfo.mediaUrl || mediaInfo.thumbnail || '',
@@ -618,9 +637,19 @@ const ReelsExtractor = {
 
         // 3. Shares
         if (data.shares === 0) {
-          const mShare = content.match(/["'](?:share_count|share_count_num)["']\s*:\s*(?:\{\s*["']count["']\s*:\s*(\d+)|(\d+))/);
+          const mShare = content.match(/["'](?:share_count|share_count_num|shares_count|post_share_count|total_share_count)["']\s*:\s*(?:\{\s*["'](?:count|total_count)["']\s*:\s*(\d+)|(\d+))/);
           if (mShare) {
             data.shares = parseInt(mShare[1] || mShare[2], 10) || 0;
+          }
+          if (data.shares === 0) {
+            const mShareAlt = content.match(/["']shares["']\s*:\s*\{\s*["']count["']\s*:\s*(\d+)/);
+            if (mShareAlt) data.shares = parseInt(mShareAlt[1], 10) || 0;
+          }
+          if (data.shares === 0) {
+            const mShareI18n = content.match(/["']i18n_share_count["']\s*:\s*["']([^"']+)["']/);
+            if (mShareI18n && mShareI18n[1]) {
+              data.shares = Parser.parseMetric(mShareI18n[1]) || 0;
+            }
           }
         }
 
@@ -656,58 +685,125 @@ const ReelsExtractor = {
 
   /**
    * Helper to extract numerical count from an action button (Like, Comment, Share)
-   * Examines aria-label, inner text, sibling spans, and parent container.
+   * Examines aria-label, inner text, sibling spans, and parent/ancestor containers up to 5 levels.
+   * STRICT: Never crosses into another action button (Like/Comment/Share) or parent toolbar.
    */
-  extractCountFromActionButton(btn) {
+  extractCountFromActionButton(btn, actionType = '') {
     if (!btn) return 0;
 
-    // 1. Check aria-label directly (e.g. "3.8K reactions", "41 comments", "74 shares")
-    const aria = (btn.getAttribute('aria-label') || '').trim();
-    if (aria && !/(?:play|pause|volume|mute|close|back|more options|next|previous|reply)/i.test(aria)) {
-      const ariaNum = Parser.parseMetric(aria);
-      if (ariaNum > 0) return ariaNum;
+    const evaluateText = (txt) => {
+      if (!txt) return 0;
+      const str = txt.trim();
+      if (!str || str.length > 45) return 0;
+      // Filter out video timestamps ("0:15 / 1:30"), dates ("5h ago"), or player controls
+      if (/^[0-9]+:[0-9]+/.test(str)) return 0;
+      if (/(?:ago|ঘণ্টা|দিন|মিনিট|yesterday|just now)/i.test(str)) return 0;
+      if (/(?:play|pause|volume|mute|close|back|more options|next|previous|reply|seek|speed|settings)/i.test(str)) return 0;
+      // If actionType is 'share', ignore button labels with no count
+      if (actionType === 'share' && /^(?:send this to friends|share to feed|share$|শেয়ার$|শেয়ার$)/i.test(str)) return 0;
+
+      return Parser.parseMetric(str);
+    };
+
+    // 1. Check aria-label and title directly on button
+    const aria = (btn.getAttribute('aria-label') || btn.getAttribute('title') || '').trim();
+    const ariaVal = evaluateText(aria);
+    if (ariaVal > 0) return ariaVal;
+
+    // Check child icons (svg, i, or nested label elements)
+    const childIcons = btn.querySelectorAll('svg, i, [aria-label], [title]');
+    for (const icon of childIcons) {
+      const iAria = (icon.getAttribute('aria-label') || icon.getAttribute('title') || '').trim();
+      const iVal = evaluateText(iAria);
+      if (iVal > 0) return iVal;
     }
 
     // 2. Check inner text or spans inside the button
     const innerSpans = btn.querySelectorAll('span, div');
     for (const s of innerSpans) {
-      const txt = (s.innerText || s.textContent || '').trim();
-      if (txt && txt.length < 35 && !/^[0-9]+:[0-9]+/.test(txt) && !/(?:ago|ঘণ্টা|দিন|view|ভিউ)/i.test(txt)) {
-        const val = Parser.parseMetric(txt);
-        if (val > 0) return val;
-      }
+      const val = evaluateText(s.innerText || s.textContent);
+      if (val > 0) return val;
     }
 
-    // 3. Check sibling element (very common layout: button icon is above count span)
-    let sibling = btn.nextElementSibling;
-    while (sibling) {
-      const txt = (sibling.innerText || sibling.textContent || '').trim();
-      if (txt && txt.length < 35 && !/^[0-9]+:[0-9]+/.test(txt) && !/(?:ago|ঘণ্টা|দিন|view|ভিউ)/i.test(txt)) {
-        const val = Parser.parseMetric(txt);
-        if (val > 0) return val;
+    // 3. Check direct siblings of btn (next & previous)
+    let nextSib = btn.nextElementSibling;
+    while (nextSib) {
+      if (nextSib.querySelector?.('[role="button"]') || nextSib.getAttribute?.('role') === 'button') {
+        break; // Stop before crossing into another button
       }
-      sibling = sibling.nextElementSibling;
+      const val = evaluateText(nextSib.innerText || nextSib.textContent);
+      if (val > 0) return val;
+      nextSib = nextSib.nextElementSibling;
+    }
+    let prevSib = btn.previousElementSibling;
+    while (prevSib) {
+      if (prevSib.querySelector?.('[role="button"]') || prevSib.getAttribute?.('role') === 'button') {
+        break;
+      }
+      const val = evaluateText(prevSib.innerText || prevSib.textContent);
+      if (val > 0) return val;
+      prevSib = prevSib.previousElementSibling;
     }
 
-    // 4. Check parent container's child spans and parent full text
-    const parent = btn.parentElement;
-    if (parent) {
-      const parentSpans = parent.querySelectorAll('span, div');
-      for (const s of parentSpans) {
-        if (btn.contains(s)) continue;
-        const txt = (s.innerText || s.textContent || '').trim();
-        if (txt && txt.length < 35 && !/^[0-9]+:[0-9]+/.test(txt) && !/(?:ago|ঘণ্টা|দিন|view|ভিউ)/i.test(txt)) {
-          const val = Parser.parseMetric(txt);
-          if (val > 0) return val;
+    // 4. Ancestor inspection (traverse UP TO 5 LEVELS)
+    // CRITICAL: Climb ancestors to find the item container holding the count span,
+    // but STOP before climbing into the common toolbar or another action button!
+    let ancestor = btn.parentElement;
+    for (let depth = 1; depth <= 5 && ancestor && ancestor !== document.body; depth++) {
+      const role = ancestor.getAttribute('role');
+      if (role === 'toolbar' || role === 'dialog' || role === 'main' || role === 'region') {
+        break;
+      }
+
+      // If ancestor contains ANY other distinct action button, STOP immediately!
+      const otherButtons = ancestor.querySelectorAll('div[role="button"], span[role="button"], a[role="button"], [role="button"]');
+      let containsOtherAction = false;
+      for (const other of otherButtons) {
+        if (other === btn || btn.contains(other) || other.contains(btn)) continue;
+        const otherAria = (other.getAttribute('aria-label') || '').toLowerCase();
+        if (
+          (actionType === 'share' && /(?:like|comment|react|love|লাইক|মন্তব্য)/i.test(otherAria)) ||
+          (actionType === 'comment' && /(?:like|share|react|love|লাইক|শেয়ার)/i.test(otherAria)) ||
+          (actionType === 'like' && /(?:comment|share|মন্তব্য|শেয়ার)/i.test(otherAria))
+        ) {
+          containsOtherAction = true;
+          break;
         }
       }
+      if (containsOtherAction) {
+        break;
+      }
 
-      // Check parent's full text
-      const parentText = (parent.innerText || parent.textContent || '').trim();
-      if (parentText && parentText.length < 40 && !/^[0-9]+:[0-9]+/.test(parentText) && !/(?:ago|ঘণ্টা|দিন|view|ভিউ)/i.test(parentText)) {
-        const val = Parser.parseMetric(parentText);
+      // Check all sibling candidate spans/divs inside this ancestor
+      const candidateNodes = ancestor.querySelectorAll('span, div');
+      for (const node of candidateNodes) {
+        if (btn.contains(node)) continue;
+        if (node.querySelector('span, div')) continue; // prefer leaf nodes
+        const val = evaluateText(node.innerText || node.textContent || node.getAttribute('aria-label'));
         if (val > 0) return val;
       }
+
+      // Check siblings of this ancestor (e.g. button wrapper has sibling count wrapper)
+      let aSib = ancestor.nextElementSibling;
+      while (aSib) {
+        if (aSib.querySelector?.('[role="button"]') || aSib.getAttribute?.('role') === 'button') {
+          break;
+        }
+        const val = evaluateText(aSib.innerText || aSib.textContent);
+        if (val > 0) return val;
+        aSib = aSib.nextElementSibling;
+      }
+
+      // Check ancestor text minus button text
+      const ancText = (ancestor.innerText || ancestor.textContent || '').trim();
+      const btnText = (btn.innerText || btn.textContent || '').trim();
+      const remaining = ancText.replace(btnText, '').trim();
+      if (remaining && remaining.length < 35) {
+        const val = evaluateText(remaining);
+        if (val > 0) return val;
+      }
+
+      ancestor = ancestor.parentElement;
     }
 
     return 0;
@@ -739,7 +835,6 @@ const ReelsExtractor = {
     if (!root) return { reactions, comments, shares, views };
 
     // 2. STRATEGY 1: Dedicated Reel Action Toolbar inside active container
-    let foundToolbarWithShare = false;
     const toolbarContainers = root.querySelectorAll(
       'div[role="toolbar"], div[data-pagelet*="Reel"] div, div[role="main"] div'
     );
@@ -763,35 +858,33 @@ const ReelsExtractor = {
         'div[role="button"][aria-label*="comment" i], div[role="button"][aria-label*="মন্তব্য" i], span[role="button"][aria-label*="comment" i]'
       );
       const shareBtn = container.querySelector(
-        'div[role="button"][aria-label*="share" i], div[role="button"][aria-label*="শেয়ার" i], div[role="button"][aria-label*="শেয়ার" i], div[role="button"][aria-label*="send this" i], span[role="button"][aria-label*="share" i]'
-      );
+        'div[role="button"][aria-label*="share" i], div[role="button"][aria-label*="shares" i], div[role="button"][aria-label*="শেয়ার" i], div[role="button"][aria-label*="শেয়ার" i], div[role="button"][aria-label*="send this" i], span[role="button"][aria-label*="share" i], [role="button"][aria-label*="share" i], [aria-label*="Send this to friends" i]'
+      ) || container.querySelector(
+        'svg[aria-label*="share" i], svg[aria-label*="shares" i], svg[aria-label*="শেয়ার" i]'
+      )?.closest('[role="button"]') || null;
 
       if (likeBtn || commentBtn || shareBtn) {
         if (likeBtn && reactions === 0) {
-          reactions = this.extractCountFromActionButton(likeBtn);
+          reactions = this.extractCountFromActionButton(likeBtn, 'like');
         }
         if (commentBtn && comments === 0) {
-          comments = this.extractCountFromActionButton(commentBtn);
+          comments = this.extractCountFromActionButton(commentBtn, 'comment');
         }
-        if (shareBtn) {
-          foundToolbarWithShare = true;
-          if (shares === 0) {
-            shares = this.extractCountFromActionButton(shareBtn);
-            // If share button is present and displays no number, it is authentically 0!
-          }
+        if (shareBtn && shares === 0) {
+          shares = this.extractCountFromActionButton(shareBtn, 'share');
         }
 
-        if (reactions > 0 || comments > 0 || shares > 0 || foundToolbarWithShare) {
+        // Only stop iterating toolbars if all primary metrics were found
+        if (reactions > 0 && comments > 0 && shares > 0) {
           break;
         }
       }
     }
 
-    // 3. STRATEGY 2: Scoped Action Buttons inside active container ONLY (never global document)
-    // Only search for shares if no toolbar with a share button was found
-    if (reactions === 0 || comments === 0 || (!foundToolbarWithShare && shares === 0)) {
+    // 3. STRATEGY 2: Scoped Action Buttons inside active container
+    if (reactions === 0 || comments === 0 || shares === 0) {
       const actionButtons = root.querySelectorAll(
-        'div[role="button"][aria-label], span[role="button"][aria-label], a[role="button"][aria-label]'
+        'div[role="button"], span[role="button"], a[role="button"], [role="button"], [aria-label*="share" i], [aria-label*="shares" i], [aria-label*="শেয়ার" i], [aria-label*="send this" i]'
       );
 
       actionButtons.forEach(btn => {
@@ -810,7 +903,7 @@ const ReelsExtractor = {
         // Likes / Reactions
         if (reactions === 0 && /(?:like|reaction|লাইক|প্রতিক্রিয়া|react\b|love\b)/i.test(aria)) {
           if (!/(?:unlike|dislike|reply)/i.test(aria)) {
-            const val = this.extractCountFromActionButton(btn);
+            const val = this.extractCountFromActionButton(btn, 'like');
             if (val > 0) reactions = val;
           }
         }
@@ -818,20 +911,63 @@ const ReelsExtractor = {
         // Comments
         if (comments === 0 && /(?:comment|মন্তব্য)/i.test(aria)) {
           if (!/(?:write|close|reply|comment as)/i.test(aria)) {
-            const val = this.extractCountFromActionButton(btn);
+            const val = this.extractCountFromActionButton(btn, 'comment');
             if (val > 0) comments = val;
           }
         }
 
-        // Shares - ONLY if foundToolbarWithShare is false
-        if (!foundToolbarWithShare && shares === 0 && /(?:share|শেয়ার|শেয়ার|send this to friends)/i.test(aria)) {
-          const val = this.extractCountFromActionButton(btn);
+        // Shares
+        if (shares === 0 && /(?:share|shares|শেয়ার|শেয়ার|send this to friends|send this)/i.test(aria)) {
+          const val = this.extractCountFromActionButton(btn, 'share');
           if (val > 0) shares = val;
         }
       });
     }
 
-    // 4. STRATEGY 3: Comments Drawer Header scan (scoped to active container)
+    // 4. STRATEGY 3: Dedicated Shares Text Scan inside active container (fallback if shares still 0)
+    if (shares === 0) {
+      const candidateElements = root.querySelectorAll('span, div, a');
+      for (const el of candidateElements) {
+        if (
+          el.children.length > 0 ||
+          el.closest('[role="article"]') ||
+          el.closest('form') ||
+          el.closest('[role="complementary"]') ||
+          el.closest('[role="region"]') ||
+          el.closest('[aria-label*="Chat" i]')
+        ) {
+          continue;
+        }
+
+        // Check aria-label
+        const aria = el.getAttribute('aria-label') || '';
+        if (
+          /(?:[0-9০-৯]+(?:\.[0-9০-৯]+)?[kmbহাজারলাখকোটি]?\s*(?:shares?|শেয়ার|টি শেয়ার)|(?:shares?|শেয়ার|টি শেয়ার)[:\s]+[0-9০-৯]+)/i.test(aria) &&
+          !/(?:send this to friends|share to feed)/i.test(aria)
+        ) {
+          const parsed = Parser.parseMetric(aria);
+          if (parsed > 0) {
+            shares = parsed;
+            break;
+          }
+        }
+
+        // Check text content (e.g. "52 shares", "52টি শেয়ার", "1 share", "1.2K shares")
+        const txt = (el.textContent || '').trim();
+        if (
+          /(?:[0-9০-৯]+(?:\.[0-9০-৯]+)?[kmbহাজারলাখকোটি]?\s*(?:shares?|শেয়ার|টি শেয়ার)|(?:shares?|শেয়ার|টি শেয়ার)[:\s]+[0-9০-৯]+)/i.test(txt) &&
+          txt.length < 35
+        ) {
+          const parsed = Parser.parseMetric(txt);
+          if (parsed > 0) {
+            shares = parsed;
+            break;
+          }
+        }
+      }
+    }
+
+    // 5. STRATEGY 4: Comments Drawer Header scan (scoped to active container)
     if (comments === 0) {
       const commentHeaders = root.querySelectorAll('h2, h3, span[dir="auto"], div[dir="auto"]');
       for (const el of commentHeaders) {
@@ -847,7 +983,7 @@ const ReelsExtractor = {
       }
     }
 
-    // 5. STRATEGY 4: Views fallback from active container if still 0
+    // 6. STRATEGY 5: Views fallback from active container if still 0
     if (views === 0) {
       const viewNodes = root.querySelectorAll('span, div');
       for (const node of viewNodes) {
@@ -1068,6 +1204,12 @@ const ReelsExtractor = {
   }
 };
 
+if (typeof globalThis !== 'undefined') {
+  globalThis.ReelsExtractor = ReelsExtractor;
+}
+if (typeof window !== 'undefined') {
+  window.ReelsExtractor = ReelsExtractor;
+}
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = ReelsExtractor;
 }
