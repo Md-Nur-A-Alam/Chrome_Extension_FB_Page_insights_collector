@@ -90,11 +90,26 @@ body.dark-theme {
   position: relative;
   z-index: 1;
   max-width: 1480px;
+  width: 100%;
   margin: 0 auto;
-  padding: 24px 32px 64px 32px;
+  padding: 20px 24px 64px 24px;
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 22px;
+  min-width: 0;
+}
+
+.dashboard-body {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  width: 100%;
+  min-width: 0;
+}
+
+.data-presentation {
+  width: 100%;
+  min-width: 0;
 }
 
 /* Glass Panels */
@@ -194,10 +209,12 @@ body.dark-theme {
   font-family: inherit;
   font-size: 13px;
   font-weight: 600;
-  padding: 9px 15px;
+  padding: 8px 14px;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .glass-btn:hover {
@@ -228,17 +245,20 @@ body.dark-theme {
 /* Analytics Stats Overview */
 .stats-overview {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
 }
 
 .stat-card {
-  padding: 20px;
+  padding: 16px 18px;
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 14px;
   position: relative;
   overflow: hidden;
+  min-width: 0;
 }
 
 .stat-card::after {
@@ -296,17 +316,20 @@ body.dark-theme {
 
 /* Toolbar & Filters */
 .toolbar-section {
-  padding: 16px 20px;
+  position: relative;
+  z-index: 50;
+  padding: 14px 18px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .search-box {
-  flex: 1;
-  min-width: 280px;
+  flex: 1 1 220px;
+  min-width: 180px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -344,27 +367,34 @@ body.dark-theme {
 .filters-row {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .filter-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-size: 12px;
   color: var(--text-medium);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .glass-select {
   background: rgba(15, 23, 42, 0.85);
   border: 1px solid var(--border-glass);
   color: #ffffff;
-  padding: 8px 12px;
+  padding: 8px 10px;
   border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: 12px;
   outline: none;
   cursor: pointer;
+  white-space: nowrap;
+  min-width: max-content;
+  flex-shrink: 0;
 }
 
 .glass-select:focus {
@@ -378,6 +408,7 @@ body.dark-theme {
   border-radius: var(--radius-sm);
   padding: 3px;
   gap: 2px;
+  flex-shrink: 0;
 }
 
 .toggle-btn {
@@ -392,6 +423,7 @@ body.dark-theme {
   justify-content: center;
   cursor: pointer;
   transition: all 0.2s ease;
+  flex-shrink: 0;
 }
 
 .toggle-btn:hover {
@@ -405,20 +437,41 @@ body.dark-theme {
 
 /* Data Table Presentation */
 .table-container {
+  width: 100%;
+  min-width: 0;
   overflow-x: auto;
   border-radius: var(--radius-lg);
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-container::-webkit-scrollbar {
+  height: 6px;
+}
+
+.table-container::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 999px;
+}
+
+.table-container::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.35);
+  border-radius: 999px;
+}
+
+.table-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.65);
 }
 
 .data-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 12.5px;
   text-align: left;
 }
 
 .data-table th {
   background: rgba(15, 23, 42, 0.7);
-  padding: 14px 16px;
+  padding: 11px 10px;
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -429,7 +482,7 @@ body.dark-theme {
 }
 
 .data-table td {
-  padding: 14px 16px;
+  padding: 11px 10px;
   border-bottom: 1px solid var(--border-glass);
   vertical-align: middle;
   color: var(--text-high);
@@ -441,9 +494,9 @@ body.dark-theme {
 
 .badge-tag {
   display: inline-block;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
-  padding: 2px 8px;
+  padding: 2px 7px;
   border-radius: 999px;
   text-transform: uppercase;
   letter-spacing: 0.3px;
@@ -471,17 +524,17 @@ body.dark-theme {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--border-glass);
   border-radius: var(--radius-xs);
-  padding: 2px 6px;
-  font-size: 11px;
+  padding: 2px 5px;
+  font-size: 10.5px;
   font-weight: 600;
   color: #cbd5e1;
   white-space: nowrap;
 }
 
 .caption-cell {
-  max-width: 320px;
-  min-width: 220px;
-  line-height: 1.45;
+  max-width: 220px;
+  min-width: 140px;
+  line-height: 1.4;
   color: #e2e8f0;
   word-break: break-word;
 }
@@ -508,8 +561,8 @@ body.dark-theme {
 .link-cell {
   display: flex;
   align-items: center;
-  gap: 8px;
-  max-width: 220px;
+  gap: 5px;
+  max-width: 145px;
 }
 
 .clean-link {
@@ -520,6 +573,7 @@ body.dark-theme {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 115px;
 }
 
 .clean-link:hover {
@@ -696,6 +750,7 @@ body.dark-theme {
  * ------------------------------------------------------------- */
 .col-visibility-wrapper {
   position: relative;
+  z-index: 50;
 }
 
 .col-dropdown-menu {
@@ -703,13 +758,13 @@ body.dark-theme {
   top: calc(100% + 8px);
   right: 0;
   min-width: 230px;
-  background: rgba(15, 23, 42, 0.96);
+  background: rgba(15, 23, 42, 0.98);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--border-glass-glow);
   border-radius: var(--radius-md);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6);
-  z-index: 100;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.7);
+  z-index: 50;
   padding: 12px 14px;
   display: flex;
   flex-direction: column;

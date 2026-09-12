@@ -142,11 +142,11 @@
             <label>Sort By:</label>
             <select id="sortFilter" class="glass-select">
               <option value="date-newest">Date (Newest)</option>
-              <option value="reactions-desc">Reactions (High to Low)</option>
-              <option value="comments-desc">Comments (High to Low)</option>
-              <option value="shares-desc">Shares (High to Low)</option>
-              <option value="views-desc">Views (High to Low)</option>
-              <option value="length-desc">Video Length (Longest)</option>
+              <option value="reactions-desc">Reactions</option>
+              <option value="comments-desc">Comments</option>
+              <option value="shares-desc">Shares</option>
+              <option value="views-desc">Views</option>
+              <option value="length-desc">Duration</option>
             </select>
           </div>
 
@@ -175,8 +175,8 @@
                 <label class="col-check-item"><input type="checkbox" data-col="type" checked> <span>Type</span></label>
                 <label class="col-check-item"><input type="checkbox" data-col="link" checked> <span>Share Link</span></label>
                 <label class="col-check-item"><input type="checkbox" data-col="author" checked> <span>Author</span></label>
-                <label class="col-check-item"><input type="checkbox" data-col="date" checked> <span>Posted Date</span></label>
-                <label class="col-check-item"><input type="checkbox" data-col="caption" checked> <span>Content / Caption</span></label>
+                <label class="col-check-item"><input type="checkbox" data-col="date" checked> <span>Date</span></label>
+                <label class="col-check-item"><input type="checkbox" data-col="caption" checked> <span>Caption</span></label>
                 <label class="col-check-item"><input type="checkbox" data-col="views" checked> <span>Views</span></label>
                 <label class="col-check-item"><input type="checkbox" data-col="reactions" checked> <span>Reactions</span></label>
                 <label class="col-check-item"><input type="checkbox" data-col="comments" checked> <span>Comments</span></label>
@@ -215,17 +215,17 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th data-col="index" style="width: 40px;">#</th>
-                <th data-col="type" style="width: 75px;">Type</th>
-                <th data-col="link">Share / Permlink Link</th>
-                <th data-col="author" style="width: 130px;">Author</th>
-                <th data-col="date" style="width: 110px;">Posted Date</th>
-                <th data-col="caption">Content / Caption</th>
-                <th data-col="views" style="width: 75px; text-align: right;">Views</th>
-                <th data-col="reactions" style="width: 75px; text-align: right;">Reactions</th>
-                <th data-col="comments" style="width: 75px; text-align: right;">Comments</th>
-                <th data-col="shares" style="width: 75px; text-align: right;">Shares</th>
-                <th data-col="actions" style="width: 105px; text-align: center;">Actions</th>
+                <th data-col="index" style="width: 36px; text-align: center;">#</th>
+                <th data-col="type" style="width: 68px;">Type</th>
+                <th data-col="link" style="width: 135px;">Share Link</th>
+                <th data-col="author" style="width: 115px;">Author</th>
+                <th data-col="date" style="width: 90px;">Date</th>
+                <th data-col="caption">Caption</th>
+                <th data-col="views" style="width: 58px; text-align: right;">Views</th>
+                <th data-col="reactions" style="width: 58px; text-align: right;">Reactions</th>
+                <th data-col="comments" style="width: 58px; text-align: right;">Comments</th>
+                <th data-col="shares" style="width: 58px; text-align: right;">Shares</th>
+                <th data-col="actions" style="width: 95px; text-align: center;">Actions</th>
               </tr>
             </thead>
             <tbody id="tableBody">
